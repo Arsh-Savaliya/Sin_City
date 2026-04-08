@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sin City Network</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              abyss: "#050505",
+              ember: "#d90429",
+              ash: "#9b9b9b",
+              smoke: "#111111",
+              bone: "#f5f1e8"
+            },
+            boxShadow: {
+              glow: "0 0 18px rgba(217, 4, 41, 0.45)",
+              panel: "0 28px 60px rgba(0, 0, 0, 0.45)"
+            },
+            fontFamily: {
+              display: ["Bebas Neue", "sans-serif"],
+              body: ["Space Grotesk", "sans-serif"]
+            }
+          }
+        }
+      };
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@300;400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/styles.css" />
+  </head>
+  <body class="min-h-screen bg-abyss text-bone font-body">
+    <div id="storyOverlay" class="story-overlay hidden"></div>
+    <div class="page-shell">
+      <header class="hero-panel">
+        <div>
+          <p class="eyebrow">Realtime criminal intelligence dashboard</p>
+          <h1 class="hero-title">Sin City Network</h1>
+          <p class="hero-copy">
+            A neo-noir intelligence board that maps syndicates, police power, and corruption
+            in a living graph. Hover for dossiers, click for deep profiles, and watch the web
+            react in real time.
+          </p>
+        </div>
+
+        <div class="hero-actions">
+          <label class="filter-chip">
+            <span>Search nodes</span>
+            <input id="searchInput" type="search" placeholder="Marcello, corruption, captain..." />
+          </label>
+          <label class="filter-chip">
+            <span>Role filter</span>
+            <select id="roleFilter">
+              <option value="all">All</option>
+              <option value="criminal">Criminals</option>
+              <option value="police">Police</option>
+              <option value="corrupt">Corrupt only</option>
+              <option value="dead">Dead only</option>
+            </select>
+          </label>
+          <button id="refreshButton" class="action-button">Refresh Intel</button>
+        </div>
+      </header>
+
+      <section id="metricGrid" class="metric-grid"></section>
+
+      <main class="dashboard-grid">
+        <section class="graph-column">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">Primary view</p>
+              <h2 class="section-title">Network visualizations</h2>
+            </div>
+            <div class="tab-row" id="graphTabs">
+              <button class="tab active" data-view="criminal">Criminal Web</button>
+              <button class="tab" data-view="power">Power Grid</button>
+              <button class="tab" data-view="hierarchy">Hierarchy</button>
+              <button class="tab" data-view="police">Police</button>
+              <button class="tab" data-view="corruption">Corruption</button>
+            </div>
+          </div>
+
+          <div class="graph-stage">
+            <div class="timeline-wrap">
+              <label for="timelineRange">Timeline filter</label>
+              <input id="timelineRange" type="range" min="0" max="100" value="100" />
+              <span id="timelineLabel">All activity</span>
+            </div>
+            <div id="graphContainer" class="graph-container"></div>
+            <div id="tooltip" class="graph-tooltip hidden"></div>
+          </div>
+
+          <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <section class="info-panel">
+              <div class="panel-header compact">
+                <div>
+                  <p class="eyebrow">AI inference</p>
+                  <h3 class="section-subtitle">Hidden relationships</h3>
+                </div>
+              </div>
+              <div id="hiddenRelationships" class="stack-list"></div>
+            </section>
+
+            <section class="info-panel">
+              <div class="panel-header compact">
+                <div>
+                  <p class="eyebrow">Power forecast</p>
+                  <h3 class="section-subtitle">Story mode timeline</h3>
+                </div>
+              </div>
+              <div id="eventTimeline" class="timeline-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <aside class="side-column">
+          <section class="profile-panel info-panel">
+            <div class="panel-header compact">
+              <div>
+                <p class="eyebrow">Selected target</p>
+                <h3 class="section-subtitle">Profile dossier</h3>
+              </div>
+            </div>
+            <div id="profilePanel" class="profile-content empty">
+              Select a node to inspect rank, money, case history, criminal record, and live status.
+            </div>
+          </section>
+
+          <section class="info-panel">
+            <div class="panel-header compact">
+              <div>
+                <p class="eyebrow">AI surveillance</p>
+                <h3 class="section-subtitle">Suspicious officers</h3>
+              </div>
+            </div>
+            <div id="suspiciousPolice" class="stack-list"></div>
+          </section>
+
+          <section class="info-panel">
+            <div class="panel-header compact">
+              <div>
+                <p class="eyebrow">Prediction</p>
+                <h3 class="section-subtitle">Power dynamics AI</h3>
+              </div>
+            </div>
+            <div id="aiPredictions" class="stack-list"></div>
+          </section>
+
+          <section class="info-panel">
+            <div class="panel-header compact">
+              <div>
+                <p class="eyebrow">System controls</p>
+                <h3 class="section-subtitle">Simulation controls</h3>
+              </div>
+            </div>
+            <div id="simulationStatus" class="form-hint">Simulation state loading...</div>
+            <div class="control-actions">
+              <button id="toggleSimulationButton" type="button" class="action-button">Pause Simulation</button>
+              <button id="runTickButton" type="button" class="action-button secondary-button">Run Event Tick</button>
+            </div>
+            <form id="statusForm" class="control-form">
+              <select id="statusPersonSelect" required></select>
+              <select id="statusValue" required>
+                <option value="alive">Alive</option>
+                <option value="dead">Dead</option>
+              </select>
+              <button type="submit" class="action-button">Apply status</button>
+            </form>
+            <p class="form-hint">Marking a target dead weakens their ties instantly across the graph.</p>
+            <div class="control-actions">
+              <button id="promoteButton" type="button" class="action-button">Promote Selected</button>
+              <button id="eliminateButton" type="button" class="action-button secondary-button">Eliminate Selected</button>
+            </div>
+          </section>
+        </aside>
+      </main>
+
+      <section class="records-layout mb-6">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Pressure map</p>
+            <h2 class="section-title">Heat and instability</h2>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <section class="info-panel">
+            <h3 class="section-subtitle mb-4">Crime density heatmap</h3>
+            <div id="heatmap" class="heatmap"></div>
+          </section>
+          <section class="info-panel">
+            <h3 class="section-subtitle mb-4">Unstable hierarchies</h3>
+            <div id="unstableHierarchies" class="stack-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="records-layout">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Case files</p>
+            <h2 class="section-title">Crime record system</h2>
+          </div>
+        </div>
+
+        <div class="records-grid">
+          <section class="info-panel">
+            <h3 class="section-subtitle mb-4">Create crime record</h3>
+            <form id="crimeForm" class="crime-form">
+              <input name="crimeId" placeholder="Crime ID" required />
+              <input name="title" placeholder="Crime title" required />
+              <input name="category" placeholder="Category" required />
+              <input name="district" placeholder="District" required />
+              <input name="occurredAt" type="datetime-local" required />
+              <input name="evidence" placeholder="Evidence note or file link" required />
+              <textarea name="summary" placeholder="Summary" rows="4" required></textarea>
+              <label>
+                <span>Committed by</span>
+                <select name="committedBy" id="crimeCommittedBy" multiple required></select>
+              </label>
+              <label>
+                <span>Solved by</span>
+                <select name="solvedBy" id="crimeSolvedBy">
+                  <option value="">Unsolved</option>
+                </select>
+              </label>
+              <label>
+                <span>Status</span>
+                <select name="status" required>
+                  <option value="open">Open</option>
+                  <option value="investigating">Investigating</option>
+                  <option value="solved">Solved</option>
+                  <option value="cold">Cold</option>
+                </select>
+              </label>
+              <button type="submit" class="action-button">Add crime</button>
+            </form>
+          </section>
+
+          <section class="info-panel">
+            <h3 class="section-subtitle mb-4">Update crime status</h3>
+            <form id="crimeStatusForm" class="crime-form">
+              <select id="crimeStatusId" required></select>
+              <select id="crimeStatusValue" required>
+                <option value="open">Open</option>
+                <option value="investigating">Investigating</option>
+                <option value="solved">Solved</option>
+                <option value="cold">Cold</option>
+              </select>
+              <select id="crimeSolvedByStatus">
+                <option value="">Solved by nobody</option>
+              </select>
+              <button type="submit" class="action-button">Update crime</button>
+            </form>
+            <div id="crimeTable" class="crime-table"></div>
+          </section>
+        </div>
+      </section>
+    </div>
+
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script type="module" src="/js/app.js"></script>
+  </body>
+</html>

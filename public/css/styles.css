@@ -1,0 +1,613 @@
+:root {
+  color-scheme: dark;
+  --bg: #050505;
+  --panel: rgba(12, 12, 12, 0.82);
+  --panel-soft: rgba(255, 255, 255, 0.03);
+  --stroke: rgba(255, 255, 255, 0.1);
+  --bone: #f5f1e8;
+  --ash: #9b9b9b;
+  --red: #d90429;
+  --red-soft: rgba(217, 4, 41, 0.18);
+  --blue: #7dd3fc;
+  --yellow: #facc15;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top, rgba(217, 4, 41, 0.12), transparent 28%),
+    radial-gradient(circle at 85% 18%, rgba(255, 255, 255, 0.06), transparent 18%),
+    linear-gradient(180deg, #0b0b0b 0%, #050505 100%);
+  overflow-x: hidden;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.03) 50%, transparent 100%),
+    repeating-linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.02) 0,
+      rgba(255, 255, 255, 0.02) 1px,
+      transparent 1px,
+      transparent 4px
+    );
+  mix-blend-mode: screen;
+  opacity: 0.35;
+}
+
+.story-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.88));
+  color: var(--bone);
+  font-family: "Bebas Neue", sans-serif;
+  font-size: clamp(2rem, 6vw, 5rem);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  opacity: 0;
+  transition: opacity 0.45s ease;
+}
+
+.story-overlay.visible {
+  opacity: 1;
+}
+
+.page-shell {
+  width: min(1600px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 1.5rem 0 3rem;
+}
+
+.hero-panel,
+.info-panel,
+.graph-stage,
+.records-layout {
+  background: var(--panel);
+  border: 1px solid var(--stroke);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 28px 60px rgba(0, 0, 0, 0.45);
+}
+
+.hero-panel {
+  padding: 2rem;
+  border-radius: 1.75rem;
+  display: grid;
+  grid-template-columns: 1.8fr 1fr;
+  gap: 1.5rem;
+  align-items: end;
+  margin-bottom: 1.5rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.5rem;
+  color: var(--red);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.32em;
+}
+
+.hero-title,
+.section-title {
+  font-family: "Bebas Neue", sans-serif;
+  letter-spacing: 0.06em;
+  margin: 0;
+}
+
+.hero-title {
+  font-size: clamp(3rem, 8vw, 6rem);
+  line-height: 0.92;
+}
+
+.hero-copy {
+  max-width: 64ch;
+  color: rgba(245, 241, 232, 0.72);
+  font-size: 1rem;
+}
+
+.hero-actions {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+
+.filter-chip,
+.crime-form label {
+  display: grid;
+  gap: 0.45rem;
+  color: var(--ash);
+  font-size: 0.88rem;
+}
+
+.filter-chip input,
+.filter-chip select,
+.crime-form input,
+.crime-form select,
+.crime-form textarea,
+.control-form select {
+  width: 100%;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--bone);
+  padding: 0.9rem 1rem;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.filter-chip input:focus,
+.filter-chip select:focus,
+.crime-form input:focus,
+.crime-form select:focus,
+.crime-form textarea:focus,
+.control-form select:focus {
+  border-color: rgba(217, 4, 41, 0.7);
+  box-shadow: 0 0 0 3px rgba(217, 4, 41, 0.16);
+}
+
+.action-button {
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(217, 4, 41, 0.95), rgba(90, 0, 0, 0.95));
+  color: white;
+  padding: 0.92rem 1.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 0 22px rgba(217, 4, 41, 0.34);
+  transition: transform 0.24s ease, box-shadow 0.24s ease;
+}
+
+.action-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 28px rgba(217, 4, 41, 0.48);
+}
+
+.secondary-button {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.08));
+  box-shadow: none;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.metric-card {
+  padding: 1rem 1.1rem;
+  border-radius: 1.3rem;
+  border: 1px solid var(--stroke);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
+}
+
+.metric-card p {
+  margin: 0;
+}
+
+.metric-card strong {
+  display: block;
+  font-size: 2rem;
+  margin-top: 0.25rem;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(340px, 0.9fr);
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.graph-column,
+.side-column {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.panel-header.compact {
+  margin-bottom: 0.6rem;
+}
+
+.section-title {
+  font-size: 2.2rem;
+}
+
+.section-subtitle {
+  margin: 0;
+  font-size: 1.1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+}
+
+.tab-row {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
+  scrollbar-width: thin;
+}
+
+.tab {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--bone);
+  padding: 0.7rem 1rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tab.active,
+.tab:hover {
+  border-color: rgba(217, 4, 41, 0.35);
+  background: rgba(217, 4, 41, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(217, 4, 41, 0.2);
+}
+
+.graph-stage {
+  position: relative;
+  min-height: 620px;
+  border-radius: 1.75rem;
+  padding: 1.2rem;
+  overflow: hidden;
+}
+
+.graph-container {
+  position: relative;
+  min-height: 520px;
+}
+
+.timeline-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  align-items: center;
+  color: var(--ash);
+  margin-bottom: 0.9rem;
+}
+
+.timeline-wrap input[type="range"] {
+  width: min(360px, 100%);
+  accent-color: var(--red);
+}
+
+.graph-tooltip {
+  position: absolute;
+  z-index: 10;
+  max-width: 300px;
+  background: rgba(8, 8, 8, 0.96);
+  color: var(--bone);
+  border: 1px solid rgba(217, 4, 41, 0.25);
+  border-radius: 1rem;
+  padding: 0.9rem 1rem;
+  pointer-events: none;
+  box-shadow: 0 0 32px rgba(217, 4, 41, 0.22);
+}
+
+.hidden {
+  display: none;
+}
+
+.info-panel {
+  padding: 1.2rem;
+  border-radius: 1.5rem;
+}
+
+.stack-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.list-card {
+  padding: 0.9rem 1rem;
+  border-radius: 1rem;
+  background: var(--panel-soft);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.list-card h4,
+.list-card p {
+  margin: 0;
+}
+
+.list-card p {
+  color: rgba(245, 241, 232, 0.7);
+  font-size: 0.92rem;
+}
+
+.profile-content {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.profile-content.empty {
+  color: rgba(245, 241, 232, 0.58);
+  min-height: 180px;
+  place-content: center;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.profile-stat {
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0.9rem;
+}
+
+.profile-stat span {
+  color: var(--ash);
+  font-size: 0.82rem;
+}
+
+.profile-stat strong {
+  display: block;
+  font-size: 1.2rem;
+}
+
+.control-form,
+.crime-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.control-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
+.form-hint {
+  color: rgba(245, 241, 232, 0.58);
+  font-size: 0.88rem;
+  margin-top: 0.8rem;
+}
+
+.records-layout {
+  padding: 1.5rem;
+  border-radius: 1.75rem;
+}
+
+.records-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.4fr);
+  gap: 1.4rem;
+}
+
+.crime-table {
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.8rem;
+  max-height: 520px;
+  overflow: auto;
+  padding-right: 0.4rem;
+}
+
+.crime-row {
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.crime-row header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.85rem;
+}
+
+.crime-row p {
+  margin: 0.45rem 0;
+  color: rgba(245, 241, 232, 0.72);
+}
+
+.status-pill {
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.status-pill.open,
+.status-pill.investigating {
+  background: rgba(250, 204, 21, 0.18);
+  color: #fde68a;
+}
+
+.status-pill.solved {
+  background: rgba(125, 211, 252, 0.15);
+  color: #bae6fd;
+}
+
+.status-pill.cold {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(245, 241, 232, 0.8);
+}
+
+.heatmap {
+  min-height: 220px;
+}
+
+.timeline-list {
+  display: grid;
+  gap: 0.85rem;
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 0.3rem;
+}
+
+.timeline-item {
+  position: relative;
+  padding: 0.9rem 1rem 0.9rem 1.3rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.timeline-item::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #d90429, rgba(217, 4, 41, 0.2));
+}
+
+.timeline-item p,
+.timeline-item h4 {
+  margin: 0;
+}
+
+.graph-svg {
+  width: 100%;
+  height: 100%;
+}
+
+.edge-label {
+  fill: rgba(245, 241, 232, 0.7);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.node-label {
+  fill: var(--bone);
+  font-size: 12px;
+  font-weight: 600;
+  text-shadow: 0 0 16px rgba(0, 0, 0, 0.9);
+}
+
+@keyframes pulseGlow {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0 rgba(217, 4, 41, 0.18));
+  }
+  50% {
+    filter: drop-shadow(0 0 12px rgba(217, 4, 41, 0.58));
+  }
+}
+
+.node-core {
+  animation: pulseGlow 2.8s ease-in-out infinite;
+}
+
+@media (max-width: 1280px) {
+  .dashboard-grid,
+  .records-grid,
+  .hero-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .graph-stage {
+    min-height: 560px;
+  }
+
+  .graph-container {
+    min-height: 460px;
+  }
+}
+
+@media (max-width: 768px) {
+  .page-shell {
+    width: min(100% - 1rem, 1600px);
+  }
+
+  .hero-panel,
+  .records-layout,
+  .info-panel,
+  .graph-stage {
+    padding: 1rem;
+  }
+
+  .profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .graph-stage {
+    min-height: 460px;
+  }
+
+  .graph-container {
+    min-height: 360px;
+  }
+
+  .control-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .crime-table,
+  .timeline-list {
+    max-height: 360px;
+  }
+}
+
+@media (max-width: 540px) {
+  .page-shell {
+    width: calc(100% - 0.5rem);
+    padding-top: 0.5rem;
+  }
+
+  .hero-title {
+    font-size: 2.7rem;
+  }
+
+  .section-title {
+    font-size: 1.7rem;
+  }
+
+  .graph-stage {
+    min-height: 380px;
+    padding: 0.85rem;
+  }
+
+  .graph-container {
+    min-height: 300px;
+  }
+
+  .timeline-wrap input[type="range"] {
+    width: 100%;
+  }
+
+  .metric-card strong {
+    font-size: 1.5rem;
+  }
+
+  .crime-form input,
+  .crime-form select,
+  .crime-form textarea,
+  .control-form select,
+  .action-button {
+    padding: 0.8rem 0.95rem;
+  }
+}
