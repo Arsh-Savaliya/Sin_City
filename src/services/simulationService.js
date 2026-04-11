@@ -2,6 +2,11 @@ const Person = require("../models/Person");
 const Relationship = require("../models/Relationship");
 const Event = require("../models/Event");
 const { successorScore, refreshDominanceScores } = require("./powerService");
+const {
+  isGeminiConfigured,
+  generateCharacterLore,
+  generateEventNarrative
+} = require("./hybridAiService");
 
 const simulationState = {
   isRunning: true,
@@ -148,7 +153,25 @@ async function uniqueGeneratedName() {
 }
 
 async function createEvent(payload) {
-  return Event.create(payload);
+  const narrative = await generateEventNarrative({
+    type: payload.type,
+    headline: payload.headline,
+    summary: payload.summary,
+    actorId: payload.actor,
+    targetId: payload.target,
+    faction: payload.faction,
+    metadata: payload.metadata
+  });
+
+  return Event.create({
+    ...payload,
+    headline: narrative.headline,
+    summary: narrative.summary,
+    metadata: {
+      ...(payload.metadata || {}),
+      narrationSource: narrative.source
+    }
+  });
 }
 
 async function listEvents(limit = 25) {
@@ -504,20 +527,26 @@ async function generateEmergentCharacter() {
     weaknessTags: pickWeaknesses()
   });
 
-  const lore = buildCharacterLore(person, backgroundTier);
-  person.backgroundTier = lore.backgroundTier;
-  person.backgroundSummary = lore.backgroundSummary;
-  person.backstory = lore.backstory;
-  person.notes = isOutsider
-    ? "AI-generated operator seeking a foothold in the city."
-    : "AI-generated climber inserted into a shaky faction.";
-  await person.save();
-
   const anchor = await Person.findOne({
     faction: person.faction,
     status: "alive",
     _id: { $ne: person._id }
   }).sort({ dominanceScore: -1 });
+
+  const lore = buildCharacterLore(person, backgroundTier);
+  const enrichedLore = await generateCharacterLore({
+    person,
+    fallbackLore: lore,
+    anchorName: anchor?.name,
+    worldState: balance
+  });
+  person.backgroundTier = enrichedLore.backgroundTier;
+  person.backgroundSummary = enrichedLore.backgroundSummary;
+  person.backstory = enrichedLore.backstory;
+  person.notes = isOutsider
+    ? "AI-generated operator seeking a foothold in the city."
+    : "AI-generated climber inserted into a shaky faction.";
+  await person.save();
 
   if (anchor) {
     await Relationship.create({
@@ -551,7 +580,8 @@ async function generateEmergentCharacter() {
     metadata: {
       generated: true,
       isOutsider,
-      backgroundTier
+      backgroundTier: enrichedLore.backgroundTier,
+      loreSource: enrichedLore.source
     }
   });
 
@@ -855,7 +885,8 @@ async function getSimulationState() {
     isRunning: simulationState.isRunning,
     intervalMs: simulationState.intervalMs,
     lastTickAt: simulationState.lastTickAt,
-    population: await getPopulationBalance()
+    population: await getPopulationBalance(),
+    narrativeMode: isGeminiConfigured() ? "hybrid-gemini-local" : "local-only"
   };
 }
 

@@ -7,6 +7,7 @@ const state = {
   dashboard: null,
   analytics: null,
   simulation: null,
+  revealObserver: null,
   view: "criminal",
   filters: {
     search: "",
@@ -56,6 +57,7 @@ const socket = io();
 
 async function init() {
   bindEvents();
+  setupInteractionAnimations();
   await loadDashboard();
   socket.emit("dashboard:refresh");
 }
@@ -216,6 +218,7 @@ function renderScene() {
   renderEventTimeline();
   renderHeatmap(dom.heatmap, state.analytics?.crimePressure);
   renderCrimeTable();
+  registerRevealTargets();
 }
 
 function renderMetrics() {
@@ -495,6 +498,7 @@ function renderSimulationStatus() {
   const population = state.simulation.population || {};
   dom.simulationStatus.textContent =
     `Simulation ${state.simulation.isRunning ? "running" : "paused"}` +
+    `${state.simulation.narrativeMode ? ` | AI ${state.simulation.narrativeMode}` : ""}` +
     `${state.simulation.lastTickAt ? ` | Last tick ${new Date(state.simulation.lastTickAt).toLocaleTimeString()}` : ""}` +
     `${population.generatedCount !== undefined ? ` | Joined ${population.generatedCount} / Killed ${population.killCount} / Surplus ${population.surplus} (${population.pressure})` : ""}`;
   dom.toggleSimulationButton.textContent = state.simulation.isRunning ? "Pause Simulation" : "Resume Simulation";
@@ -544,6 +548,91 @@ function triggerStoryOverlay(event, reason) {
     dom.storyOverlay.classList.remove("visible");
     window.setTimeout(() => dom.storyOverlay.classList.add("hidden"), 450);
   }, 1800);
+}
+
+function setupInteractionAnimations() {
+  document.addEventListener("click", (event) => {
+    const directInteractive = event.target.closest(".action-button, .tab");
+    if (event.target.closest("input, select, textarea") && !directInteractive) {
+      return;
+    }
+
+    const target = event.target.closest(
+      ".action-button, .tab, .metric-card, .list-card, .profile-stat, .crime-row, .timeline-item"
+    );
+
+    if (!target) {
+      return;
+    }
+
+    target.classList.remove("press-pop");
+    void target.offsetWidth;
+    target.classList.add("press-pop");
+    spawnRipple(target, event);
+  });
+
+  setupRevealObserver();
+}
+
+function setupRevealObserver() {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    return;
+  }
+
+  state.revealObserver = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) {
+          return;
+        }
+
+        entry.target.classList.add("is-visible", "scroll-glow");
+        window.setTimeout(() => entry.target.classList.remove("scroll-glow"), 900);
+        state.revealObserver.unobserve(entry.target);
+      });
+    },
+    {
+      threshold: 0.16,
+      rootMargin: "0px 0px -8% 0px"
+    }
+  );
+}
+
+function registerRevealTargets() {
+  const revealTargets = document.querySelectorAll(
+    ".hero-panel, .metric-card, .graph-stage, .info-panel, .records-layout, .crime-row, .timeline-item"
+  );
+
+  revealTargets.forEach((element, index) => {
+    if (element.dataset.revealBound === "true") {
+      return;
+    }
+
+    element.dataset.revealBound = "true";
+    element.classList.add("reveal-on-scroll");
+    element.style.setProperty("--reveal-delay", `${Math.min(index * 45, 240)}ms`);
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || !state.revealObserver) {
+      element.classList.add("is-visible");
+      return;
+    }
+
+    state.revealObserver.observe(element);
+  });
+}
+
+function spawnRipple(target, event) {
+  const rect = target.getBoundingClientRect();
+  const ripple = document.createElement("span");
+  ripple.className = "click-ripple";
+
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  ripple.style.left = `${x}px`;
+  ripple.style.top = `${y}px`;
+
+  target.appendChild(ripple);
+  window.setTimeout(() => ripple.remove(), 720);
 }
 
 function debounce(fn, delay = 150) {

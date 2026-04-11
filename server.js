@@ -41,6 +41,10 @@ app.get("/health", (_req, res) => {
   });
 });
 
+app.get(/^\/(?!api(?:\/|$)|health$).*/, (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
 app.use((err, _req, res, _next) => {
   console.error(err);
   res.status(err.status || 500).json({

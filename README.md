@@ -10,6 +10,7 @@ Sin City Network is a full-stack crime intelligence platform with a noir interfa
 - Database: MongoDB with Mongoose
 - Realtime: Socket.io
 - AI: logic-based analytics engine for hidden relationship detection, influence scoring, and police corruption suspicion
+- Optional narrative API: Google Gemini in hybrid mode for richer character lore and event narration
 - Simulation: KGF-style power dynamics engine with succession, betrayal, outsider rise, and event timeline
 
 ## Features
@@ -26,6 +27,7 @@ Sin City Network is a full-stack crime intelligence platform with a noir interfa
 - Story timeline with simulation events such as assassinations, betrayals, raids, and successions
 - AI-generated new characters can enter unstable factions or emerge as outsiders over time
 - AI-generated characters now arrive with a background tier and full backstory, and the simulation will bias toward lethal corrections when new arrivals outpace deaths by too much
+- If `GEMINI_API_KEY` is present, new character lore and major event narration are enriched by Gemini with automatic fallback to the local generator
 - Play/pause simulation controls plus user-triggered promote, eliminate, and manual event tick actions
 - Responsive layout tuned for phones, tablets, and desktop screens
 
@@ -65,21 +67,29 @@ Sin City Network is a full-stack crime intelligence platform with a noir interfa
 
 1. Install MongoDB locally and make sure it is running.
 2. Copy `.env.example` to `.env`.
-3. Install dependencies:
+3. Optional: add a Gemini API key to `.env` for hybrid narrative generation.
+4. Install dependencies:
 
 ```bash
 npm install
 ```
 
-4. Start the app:
+5. Start the app:
 
 ```bash
 npm run dev
 ```
 
-5. Open [http://localhost:5000](http://localhost:5000).
+6. Open [http://localhost:5000](http://localhost:5000).
 
 The app auto-seeds the database on first boot.
+
+Optional Gemini environment variables:
+
+```env
+GEMINI_API_KEY=your_google_ai_studio_key
+GEMINI_MODEL=gemini-2.5-flash
+```
 
 If you already ran an older version of the project, clear the old `sin-city` database first so the new power-dynamics fields and seed events load cleanly.
 
@@ -121,3 +131,4 @@ If you already ran an older version of the project, clear the old `sin-city` dat
 - Framer Motion was not added because this build uses a non-React frontend; motion is handled with CSS and D3 transitions instead.
 - Tailwind is loaded through the CDN for a simpler local setup without a frontend build step.
 - The simulation engine runs automatically every 18 seconds by default and also supports manual triggering from the UI.
+- Gemini is used only as a narrative enrichment layer in hybrid mode; the deterministic local simulation remains the source of truth for kills, succession, power shifts, and balancing.
