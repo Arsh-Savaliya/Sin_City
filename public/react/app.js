@@ -1,4 +1,3 @@
-import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { React, html, AnimatePresence, motion } from "./lib/html.js";
 import { useDashboardData } from "./hooks/useDashboardData.js";
 import { Sidebar } from "./components/layout/Sidebar.js";
@@ -12,6 +11,7 @@ import { UserDetailsPage } from "./pages/UserDetailsPage.js";
 import { buildMessages } from "./utils/dashboard.js";
 import { mockMessages, mockUserProfile } from "./data/mockData.js";
 
+const { Navigate, Route, Routes, useLocation, useNavigate } = window.ReactRouterDOM;
 const { useEffect, useMemo, useState } = React;
 
 export function App() {

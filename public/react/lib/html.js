@@ -1,5 +1,5 @@
-import * as React from "react";
-import htm from "htm";
+const React = window.React;
+const htm = window.htm;
 
 const html = htm.bind(React.createElement);
 const ignoredMotionProps = new Set([

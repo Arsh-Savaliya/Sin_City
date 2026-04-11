@@ -1,7 +1,7 @@
-import { NavLink } from "react-router-dom";
 import { html, motion } from "../../lib/html.js";
 import { Icons } from "./icons.js";
 
+const { NavLink } = window.ReactRouterDOM;
 const navItems = [
   { to: "/networks", label: "Networks", icon: Icons.network },
   { to: "/pressure-map", label: "Pressure Map", icon: Icons.heat },

@@ -1,7 +1,7 @@
-import * as d3 from "d3";
 import { React, html } from "../../lib/html.js";
 import { getInfluenceColor, initials } from "../../utils/dashboard.js";
 
+const d3 = window.d3;
 const { useEffect, useRef } = React;
 
 const linkColors = {

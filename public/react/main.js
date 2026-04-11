@@ -1,8 +1,8 @@
-import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
 import { html } from "./lib/html.js";
 import { App } from "./app.js";
 
+const { createRoot } = window.ReactDOM;
+const { BrowserRouter } = window.ReactRouterDOM;
 const container = document.getElementById("root");
 
 function renderBootError(message) {
