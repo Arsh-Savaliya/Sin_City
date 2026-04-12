@@ -11,6 +11,7 @@ const personSchema = new mongoose.Schema(
       enum: ["criminal", "police", "informant", "civilian"],
       required: true
     },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     faction: { type: String, trim: true },
     rank: { type: String, trim: true },
     money: { type: Number, default: 0 },
@@ -59,6 +60,10 @@ const personSchema = new mongoose.Schema(
   }
 );
 
+personSchema.index({ userId: 1 });
+personSchema.index({ userId: 1, role: 1 });
+personSchema.index({ userId: 1, status: 1 });
+
 personSchema.pre("save", function deriveDominance(next) {
   this.dominanceScore =
     this.powerLevel * 0.45 +
@@ -72,9 +77,10 @@ const Person = mongoose.model("Person", personSchema);
 
 const crimeSchema = new mongoose.Schema(
   {
-    crimeId: { type: String, required: true, unique: true, trim: true },
+    crimeId: { type: String, required: true, trim: true },
     title: { type: String, required: true, trim: true },
     category: { type: String, required: true, trim: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     status: {
       type: String,
       enum: ["open", "investigating", "solved", "cold"],
@@ -115,6 +121,7 @@ const relationshipSchema = new mongoose.Schema(
       ref: "Person",
       required: true
     },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     type: {
       type: String,
       enum: ["alliance", "rivalry", "transaction", "command", "official", "corruption"],
@@ -135,7 +142,8 @@ const relationshipSchema = new mongoose.Schema(
   }
 );
 
-relationshipSchema.index({ source: 1, target: 1, type: 1 }, { unique: true });
+relationshipSchema.index({ userId: 1 });
+relationshipSchema.index({ userId: 1, source: 1, target: 1, type: 1 }, { unique: true });
 
 const Relationship = mongoose.model("Relationship", relationshipSchema);
 
@@ -157,6 +165,7 @@ const eventSchema = new mongoose.Schema(
       ],
       required: true
     },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     headline: { type: String, required: true, trim: true },
     summary: { type: String, required: true, trim: true },
     actor: { type: mongoose.Schema.Types.ObjectId, ref: "Person" },
@@ -172,4 +181,28 @@ const eventSchema = new mongoose.Schema(
 
 const Event = mongoose.model("Event", eventSchema);
 
-module.exports = { Person, Crime, Relationship, Event };
+const userSchema = new mongoose.Schema({
+  username: { type: String, required: true, unique: true, trim: true, minlength: 3 },
+  email: { type: String, required: true, unique: true, trim: true },
+  password: { type: String, required: true, minlength: 6 },
+  role: { type: String, enum: ["operator", "admin"], default: "operator" },
+  isActive: { type: Boolean, default: true },
+  lastLogin: { type: Date },
+  createdAt: { type: Date, default: Date.now }
+}, { timestamps: true });
+
+userSchema.pre("save", function hashPassword(next) {
+  if (!this.isModified("password")) return next();
+  const bcrypt = require("bcryptjs");
+  this.password = bcrypt.hashSync(this.password, 10);
+  next();
+});
+
+userSchema.methods.comparePassword = function(password) {
+  const bcrypt = require("bcryptjs");
+  return bcrypt.compareSync(password, this.password);
+};
+
+const User = mongoose.model("User", userSchema);
+
+module.exports = { Person, Crime, Relationship, Event, User };

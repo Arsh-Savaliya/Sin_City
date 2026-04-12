@@ -1,10 +1,13 @@
-const jsonHeaders = {
-  "Content-Type": "application/json"
-};
+function authHeaders(token) {
+  return token ? { 
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${token}`
+  } : { "Content-Type": "application/json" };
+}
 
-async function request(path, options = {}) {
+async function request(path, options = {}, token) {
   const response = await fetch(path, {
-    headers: jsonHeaders,
+    headers: authHeaders(token),
     ...options
   });
 
@@ -17,40 +20,47 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  getDashboard: () => request("/api/dashboard/graph"),
-  getAnalytics: () => request("/api/dashboard/analytics"),
-  getSimulation: () => request("/api/dashboard/simulation"),
-  updatePersonStatus: (id, status) =>
+  getDashboard: (token) => request("/api/dashboard/graph", {}, token),
+  getAnalytics: (token) => request("/api/dashboard/analytics", {}, token),
+  getSimulation: (token) => request("/api/dashboard/simulation", {}, token),
+  
+  updatePersonStatus: (id, status, token) =>
     request(`/api/people/${id}`, {
       method: "PATCH",
       body: JSON.stringify({ status })
-    }),
-  createCrime: (payload) =>
+    }, token),
+    
+  createCrime: (payload, token) =>
     request("/api/crimes", {
       method: "POST",
       body: JSON.stringify(payload)
-    }),
-  updateCrime: (id, payload) =>
+    }, token),
+    
+  updateCrime: (id, payload, token) =>
     request(`/api/crimes/${id}`, {
       method: "PATCH",
       body: JSON.stringify(payload)
-    }),
-  toggleSimulation: (isRunning) =>
+    }, token),
+    
+  toggleSimulation: (isRunning, token) =>
     request("/api/dashboard/simulation/toggle", {
       method: "POST",
       body: JSON.stringify({ isRunning })
-    }),
-  runSimulationTick: (reason = "manual-ui") =>
+    }, token),
+    
+  runSimulationTick: (reason = "manual-ui", token) =>
     request("/api/dashboard/simulation/tick", {
       method: "POST",
       body: JSON.stringify({ reason })
-    }),
-  promoteCharacter: (id) =>
+    }, token),
+    
+  promoteCharacter: (id, token) =>
     request(`/api/dashboard/characters/${id}/promote`, {
       method: "POST"
-    }),
-  eliminateCharacter: (id) =>
+    }, token),
+    
+  eliminateCharacter: (id, token) =>
     request(`/api/dashboard/characters/${id}/eliminate`, {
       method: "POST"
-    })
+    }, token)
 };

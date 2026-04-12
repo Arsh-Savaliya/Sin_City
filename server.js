@@ -10,6 +10,9 @@ const { Server } = require("socket.io");
 const {
   connectDB,
   asyncHandler,
+  registerUser,
+  loginUser,
+  authenticateToken,
   listPeople, createPerson, updatePerson, deletePerson,
   listCrimes, createCrime, updateCrime,
   listRelationships, createRelationship, updateRelationship, deleteRelationship,
@@ -45,75 +48,96 @@ app.use((req, res, next) => {
   next();
 });
 
+const userIdFromRequest = (req) => req.user?.userId;
+
+// Auth routes (public)
+const authRouter = express.Router();
+authRouter.post("/register", asyncHandler(async (req, res) => {
+  const result = await registerUser(req.body);
+  res.status(201).json(result);
+}));
+authRouter.post("/login", asyncHandler(async (req, res) => {
+  const result = await loginUser(req.body);
+  res.json(result);
+}));
+
+app.use("/api/auth", authRouter);
+
+// Define routers first
 const peopleRouter = express.Router();
+const crimeRouter = express.Router();
+const relationshipRouter = express.Router();
+const dashboardRouter = express.Router();
+
+// People routes
 peopleRouter.get("/", asyncHandler(async (req, res) => {
-  const people = await listPeople(req.query);
+  const people = await listPeople(userIdFromRequest(req), req.query);
   res.json(people);
 }));
 peopleRouter.post("/", asyncHandler(async (req, res) => {
-  const person = await createPerson(req.body);
+  const person = await createPerson(userIdFromRequest(req), req.body);
   emitGraphRefresh(req.app.get("io"), "person:create");
   res.status(201).json(person);
 }));
 peopleRouter.patch("/:id", asyncHandler(async (req, res) => {
-  const person = await updatePerson(req.params.id, req.body);
+  const person = await updatePerson(userIdFromRequest(req), req.params.id, req.body);
   emitGraphRefresh(req.app.get("io"), "person:update");
   res.json(person);
 }));
 peopleRouter.delete("/:id", asyncHandler(async (req, res) => {
-  const person = await deletePerson(req.params.id);
+  const person = await deletePerson(userIdFromRequest(req), req.params.id);
   emitGraphRefresh(req.app.get("io"), "person:delete");
   res.json(person);
 }));
 
-const crimeRouter = express.Router();
-crimeRouter.get("/", asyncHandler(async (_req, res) => {
-  const crimes = await listCrimes();
+// Crime routes
+crimeRouter.get("/", asyncHandler(async (req, res) => {
+  const crimes = await listCrimes(userIdFromRequest(req));
   res.json(crimes);
 }));
 crimeRouter.post("/", asyncHandler(async (req, res) => {
-  const crime = await createCrime(req.body);
+  const crime = await createCrime(userIdFromRequest(req), req.body);
   emitGraphRefresh(req.app.get("io"), "crime:create");
   res.status(201).json(crime);
 }));
 crimeRouter.patch("/:id", asyncHandler(async (req, res) => {
-  const crime = await updateCrime(req.params.id, req.body);
+  const crime = await updateCrime(userIdFromRequest(req), req.params.id, req.body);
   emitGraphRefresh(req.app.get("io"), "crime:update");
   res.json(crime);
 }));
 
-const relationshipRouter = express.Router();
-relationshipRouter.get("/", asyncHandler(async (_req, res) => {
-  const data = await listRelationships();
+// Relationship routes
+relationshipRouter.get("/", asyncHandler(async (req, res) => {
+  const data = await listRelationships(userIdFromRequest(req));
   res.json(data);
 }));
 relationshipRouter.post("/", asyncHandler(async (req, res) => {
-  const relationship = await createRelationship(req.body);
+  const relationship = await createRelationship(userIdFromRequest(req), req.body);
   emitGraphRefresh(req.app.get("io"), "relationship:create");
   res.status(201).json(relationship);
 }));
 relationshipRouter.patch("/:id", asyncHandler(async (req, res) => {
-  const relationship = await updateRelationship(req.params.id, req.body);
+  const relationship = await updateRelationship(userIdFromRequest(req), req.params.id, req.body);
   emitGraphRefresh(req.app.get("io"), "relationship:update");
   res.json(relationship);
 }));
 relationshipRouter.delete("/:id", asyncHandler(async (req, res) => {
-  const relationship = await deleteRelationship(req.params.id);
+  const relationship = await deleteRelationship(userIdFromRequest(req), req.params.id);
   emitGraphRefresh(req.app.get("io"), "relationship:delete");
   res.json(relationship);
 }));
 
-const dashboardRouter = express.Router();
-dashboardRouter.get("/graph", asyncHandler(async (_req, res) => {
-  const graph = await getDashboardGraph();
+// Dashboard routes
+dashboardRouter.get("/graph", asyncHandler(async (req, res) => {
+  const graph = await getDashboardGraph(userIdFromRequest(req));
   res.json(graph);
 }));
-dashboardRouter.get("/analytics", asyncHandler(async (_req, res) => {
-  const analytics = await runRelationshipAnalysis();
+dashboardRouter.get("/analytics", asyncHandler(async (req, res) => {
+  const analytics = await runRelationshipAnalysis(userIdFromRequest(req));
   res.json(analytics);
 }));
-dashboardRouter.get("/events", asyncHandler(async (_req, res) => {
-  const events = await listEvents();
+dashboardRouter.get("/events", asyncHandler(async (req, res) => {
+  const events = await listEvents(userIdFromRequest(req));
   res.json(events);
 }));
 dashboardRouter.get("/simulation", asyncHandler(async (_req, res) => {
@@ -132,7 +156,7 @@ dashboardRouter.post("/simulation/tick", asyncHandler(async (req, res) => {
 
 const { Person } = require("./src/models");
 dashboardRouter.post("/characters/:id/promote", asyncHandler(async (req, res) => {
-  const person = await Person.findById(req.params.id);
+  const person = await Person.findOne({ _id: req.params.id, userId: userIdFromRequest(req) });
   if (!person) {
     const error = new Error("Character not found");
     error.status = 404;
@@ -142,7 +166,7 @@ dashboardRouter.post("/characters/:id/promote", asyncHandler(async (req, res) =>
   person.influenceScore = Math.min(100, person.influenceScore + 10);
   person.loyaltyScore = Math.min(100, person.loyaltyScore + 6);
   await person.save();
-  await createEvent({
+  await createEvent(userIdFromRequest(req), {
     type: "promotion",
     headline: `${person.name} was promoted`,
     summary: `${person.name} received a user-forced promotion and surged upward in the power map.`,
@@ -153,7 +177,7 @@ dashboardRouter.post("/characters/:id/promote", asyncHandler(async (req, res) =>
   res.json(person);
 }));
 dashboardRouter.post("/characters/:id/eliminate", asyncHandler(async (req, res) => {
-  const person = await Person.findById(req.params.id);
+  const person = await Person.findOne({ _id: req.params.id, userId: userIdFromRequest(req) });
   if (!person) {
     const error = new Error("Character not found");
     error.status = 404;
@@ -162,7 +186,7 @@ dashboardRouter.post("/characters/:id/eliminate", asyncHandler(async (req, res) 
   person.status = "dead";
   person.powerLevel = 0;
   await person.save();
-  await createEvent({
+  await createEvent(userIdFromRequest(req), {
     type: "elimination",
     headline: `${person.name} was eliminated`,
     summary: `${person.name} was removed by direct user action, forcing the network to adapt immediately.`,
@@ -174,10 +198,11 @@ dashboardRouter.post("/characters/:id/eliminate", asyncHandler(async (req, res) 
   res.json(person);
 }));
 
-app.use("/api/people", peopleRouter);
-app.use("/api/relationships", relationshipRouter);
-app.use("/api/crimes", crimeRouter);
-app.use("/api/dashboard", dashboardRouter);
+// Mount protected routes with authentication middleware
+app.use("/api/people", authenticateToken, peopleRouter);
+app.use("/api/relationships", authenticateToken, relationshipRouter);
+app.use("/api/crimes", authenticateToken, crimeRouter);
+app.use("/api/dashboard", authenticateToken, dashboardRouter);
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "sin-city-network", timestamp: new Date().toISOString() });

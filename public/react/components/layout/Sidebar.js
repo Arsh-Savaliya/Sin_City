@@ -9,15 +9,15 @@ const navItems = [
   { key: "user-details", label: "User Details" }
 ];
 
-export function Sidebar({ currentPage, onNavigate, userProfile }) {
+export function Sidebar({ currentPage, onNavigate, userProfile, onLogout }) {
   return html`
-    <aside className="w-64 bg-white/5 border-r border-white/10 min-h-screen p-4">
+    <aside className="w-64 bg-white/5 border-r border-white/10 min-h-screen p-4 flex flex-col">
       <div className="mb-8">
-        <p className="font-display text-4xl uppercase tracking-widest text-blood">Sin City</p>
+        <p className="font-display text-3xl uppercase tracking-widest text-blood">Black Horizon</p>
         <p className="text-xs uppercase tracking-widest text-white/50 mt-1">Intelligence Unit</p>
       </div>
 
-      <nav className="space-y-2">
+      <nav className="space-y-2 flex-1">
         ${navItems.map((item) => html`
           <button
             key=${item.key}
@@ -34,16 +34,23 @@ export function Sidebar({ currentPage, onNavigate, userProfile }) {
         `)}
       </nav>
 
-      <div className="mt-8 pt-4 border-t border-white/10">
-        <div className="flex items-center gap-3 px-2">
+      <div className="pt-4 border-t border-white/10">
+        <div className="flex items-center gap-3 px-2 mb-3">
           <div className="w-10 h-10 rounded-full bg-blood/30 flex items-center justify-center text-white font-bold">
-            ${(userProfile?.name || "JM").split(" ").map(p => p[0]).join("").slice(0,2)}
+            ${(userProfile?.username || "OP").slice(0,2).toUpperCase()}
           </div>
           <div>
-            <p className="text-sm font-bold uppercase tracking-wider">${userProfile?.name || "J. Marlowe"}</p>
+            <p className="text-sm font-bold uppercase tracking-wider">${userProfile?.username || "Operator"}</p>
             <p className="text-xs text-white/50 uppercase">${userProfile?.role || "Operator"}</p>
           </div>
         </div>
+        <button
+          type="button"
+          onClick=${onLogout}
+          className="w-full text-left px-4 py-2 rounded text-xs uppercase tracking-wider text-white/50 hover:text-blood transition"
+        >
+          Logout
+        </button>
       </div>
     </aside>
   `;

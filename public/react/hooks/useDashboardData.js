@@ -1,49 +1,48 @@
 import { React } from "../lib/html.js";
 import { api } from "../api/client.js";
-import { mockAnalytics, mockDashboard, mockSimulation } from "../data/mockData.js";
 
 const { useCallback, useEffect, useMemo, useState } = React;
 
-export function useDashboardData() {
-  const [dashboard, setDashboard] = useState(mockDashboard);
-  const [analytics, setAnalytics] = useState(mockAnalytics);
-  const [simulation, setSimulation] = useState(mockSimulation);
+export function useDashboardData(token) {
+  const [dashboard, setDashboard] = useState(null);
+  const [analytics, setAnalytics] = useState(null);
+  const [simulation, setSimulation] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [usingMockData, setUsingMockData] = useState(false);
 
   const loadAll = useCallback(async () => {
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+
     setError("");
+    setLoading(true);
 
     try {
       const [dashboardData, analyticsData, simulationData] = await Promise.all([
-        api.getDashboard(),
-        api.getAnalytics(),
-        api.getSimulation()
+        api.getDashboard(token),
+        api.getAnalytics(token),
+        api.getSimulation(token)
       ]);
 
-      setDashboard(dashboardData || mockDashboard);
-      setAnalytics(analyticsData || mockAnalytics);
-      setSimulation(simulationData || mockSimulation);
-      setUsingMockData(false);
+      setDashboard(dashboardData);
+      setAnalytics(analyticsData);
+      setSimulation(simulationData);
     } catch (loadError) {
-      console.error("Falling back to mock dashboard data", loadError);
-      setDashboard(mockDashboard);
-      setAnalytics(mockAnalytics);
-      setSimulation(mockSimulation);
-      setUsingMockData(true);
-      setError(loadError.message || "Failed to load live dashboard data.");
+      console.error("Failed to load dashboard data", loadError);
+      setError(loadError.message || "Failed to load data");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     loadAll();
   }, [loadAll]);
 
   useEffect(() => {
-    if (typeof window.io !== "function") {
+    if (!token || typeof window.io !== "function") {
       return undefined;
     }
 
@@ -63,42 +62,42 @@ export function useDashboardData() {
       socket.off("graph:refresh", handleRefresh);
       socket.disconnect();
     };
-  }, [loadAll]);
+  }, [token, loadAll]);
 
   const actions = useMemo(
     () => ({
       refresh: loadAll,
       async updatePersonStatus(id, status) {
-        await api.updatePersonStatus(id, status);
+        await api.updatePersonStatus(id, status, token);
         await loadAll();
       },
       async createCrime(payload) {
-        await api.createCrime(payload);
+        await api.createCrime(payload, token);
         await loadAll();
       },
       async updateCrime(id, payload) {
-        await api.updateCrime(id, payload);
+        await api.updateCrime(id, payload, token);
         await loadAll();
       },
       async toggleSimulation(isRunning) {
-        const nextState = await api.toggleSimulation(isRunning);
+        const nextState = await api.toggleSimulation(isRunning, token);
         setSimulation(nextState);
         await loadAll();
       },
       async runSimulationTick(reason) {
-        await api.runSimulationTick(reason);
+        await api.runSimulationTick(reason, token);
         await loadAll();
       },
       async promoteCharacter(id) {
-        await api.promoteCharacter(id);
+        await api.promoteCharacter(id, token);
         await loadAll();
       },
       async eliminateCharacter(id) {
-        await api.eliminateCharacter(id);
+        await api.eliminateCharacter(id, token);
         await loadAll();
       }
     }),
-    [loadAll]
+    [loadAll, token]
   );
 
   return {
@@ -107,7 +106,6 @@ export function useDashboardData() {
     simulation,
     loading,
     error,
-    usingMockData,
     actions
   };
 }

@@ -3,34 +3,29 @@ import { useDashboardData } from "./hooks/useDashboardData.js";
 import { NetworkGraph } from "./components/graphs/NetworkGraph.js";
 import { HierarchyGraph } from "./components/graphs/HierarchyGraph.js";
 import { Sidebar } from "./components/layout/Sidebar.js";
+import { AuthScreen } from "./components/AuthScreen.js";
 import { getGraphForView, viewOptions, clampPercent, buildMessages } from "./utils/dashboard.js";
 import { mockMessages, mockUserProfile } from "./data/mockData.js";
 
 const { useEffect, useMemo, useState } = React;
 
 export function App() {
-  const { dashboard, analytics, simulation, loading, error, actions } = useDashboardData();
+  const [user, setUser] = useState(() => {
+    const saved = localStorage.getItem("bh_user");
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [token, setToken] = useState(() => localStorage.getItem("bh_token"));
+
+  const { dashboard, analytics, simulation, loading, error, actions } = useDashboardData(token);
   const [currentPage, setCurrentPage] = useState("networks");
   const [selectedNode, setSelectedNode] = useState(null);
-  const [searchQuery, setSearchQuery] = useState("");
 
-  const people = dashboard?.people || [];
-  const matchedNode = useMemo(() => {
-    if (!searchQuery.trim()) return null;
-    return people.find((person) =>
-      [person.name, person.alias, person.rank, person.faction]
-        .filter(Boolean).join(" ").toLowerCase().includes(searchQuery.trim().toLowerCase())
-    );
-  }, [people, searchQuery]);
-
-  function handleSearch(e) {
-    e.preventDefault();
-    if (matchedNode) {
-      setSelectedNode(matchedNode);
-      setCurrentPage("user-details");
-    }
+  // Show auth screen if not logged in
+  if (!user || !token) {
+    return html`<${AuthScreen} onLogin=${(u, t) => { setUser(u); setToken(t); }} />`;
   }
 
+  // Show loading while fetching data
   if (loading) {
     return html`
       <div className="min-h-screen bg-black flex items-center justify-center">
@@ -42,29 +37,34 @@ export function App() {
     `;
   }
 
+  const people = dashboard?.people || [];
+
+  function handleLogout() {
+    localStorage.removeItem("bh_token");
+    localStorage.removeItem("bh_user");
+    setUser(null);
+    setToken(null);
+  }
+
   return html`
     <div className="min-h-screen bg-black text-white flex">
       <${Sidebar}
         currentPage=${currentPage}
         onNavigate=${setCurrentPage}
-        userProfile=${mockUserProfile}
+        userProfile=${user}
+        onLogout=${handleLogout}
       />
 
       <main className="flex-1 p-6">
-        <header className="mb-8 flex items-center justify-between">
+        <header className="mb-8 flex items-center justify-between border-b border-white/10 pb-6">
           <div>
-            <p className="text-xs uppercase tracking-widest text-white/40">Welcome Back</p>
-            <h1 className="font-display text-4xl uppercase tracking-widest">J. Marlowe</h1>
+            <h1 className="font-display text-3xl uppercase tracking-widest text-blood">Black Horizon</h1>
+            <p className="text-xs uppercase tracking-widest text-white/40 mt-1">Intelligence Unit</p>
           </div>
-          <form onSubmit=${handleSearch} className="flex gap-2">
-            <input
-              value=${searchQuery}
-              onChange=${(e) => setSearchQuery(e.target.value)}
-              placeholder="Search..."
-              className="bg-white/10 border border-white/20 px-4 py-2 rounded text-white placeholder-white/50"
-            />
-            <button type="submit" className="bg-blood px-4 py-2 rounded uppercase text-sm">Search</button>
-          </form>
+          <div className="text-right">
+            <p className="text-xs uppercase tracking-widest text-white/40">Operator</p>
+            <p className="font-display text-xl uppercase tracking-widest">J. Marlowe</p>
+          </div>
         </header>
 
         ${error && html`<div className="bg-blood/20 border border-blood/30 p-4 rounded mb-6 text-blood">${error}</div>`}
@@ -124,26 +124,35 @@ function NetworksPage({ dashboard, analytics, simulation, selectedNode, setSelec
 
   const graph = useMemo(() => getGraphForView(dashboard, view), [dashboard, view]);
 
+  // Get stats based on view
+  const criminals = dashboard?.people?.filter(p => p.role === "criminal") || [];
+  const police = dashboard?.people?.filter(p => p.role === "police") || [];
+  const viewNodes = view === "police" ? police : criminals;
+  const corruptionLinks = graph?.links?.filter(l => l.type === "corruption") || [];
+  const rivalryLinks = graph?.links?.filter(l => l.type === "rivalry") || [];
+
+  const viewTitle = view === "police" ? "Police Network" : view === "hierarchy" ? "Power Hierarchy" : "Criminal Network";
+
   return html`
     <div>
-      <h2 className="font-display text-3xl uppercase tracking-widest mb-6">Criminal Network</h2>
-      
+      <h2 className="font-display text-3xl uppercase tracking-widest mb-6">${viewTitle}</h2>
+       
       <div className="grid grid-cols-4 gap-4 mb-6">
         <div className="bg-white/5 p-4 rounded">
-          <p className="text-xs uppercase tracking-widest text-white/50">Nodes</p>
-          <p className="font-display text-3xl">${analytics?.summary?.nodeCount || 0}</p>
+          <p className="text-xs uppercase tracking-widest text-white/50">${view === "police" ? "Officers" : "Members"}</p>
+          <p className="font-display text-3xl">${viewNodes.length}</p>
         </div>
         <div className="bg-white/5 p-4 rounded">
-          <p className="text-xs uppercase tracking-widest text-white/50">Edges</p>
-          <p className="font-display text-3xl">${analytics?.summary?.edgeCount || 0}</p>
+          <p className="text-xs uppercase tracking-widest text-white/50">Connections</p>
+          <p className="font-display text-3xl">${graph?.links?.length || 0}</p>
         </div>
         <div className="bg-white/5 p-4 rounded">
-          <p className="text-xs uppercase tracking-widest text-white/50">Targets</p>
-          <p className="font-display text-3xl text-blood">${dashboard?.people?.filter((p) => (p.dominanceScore || 0) >= 420).length || 0}</p>
+          <p className="text-xs uppercase tracking-widest text-white/50">${view === "police" ? "Corrupt" : "High Value"}</p>
+          <p className="font-display text-3xl text-blood">${view === "police" ? police.filter(p => p.isCorrupt).length : criminals.filter(p => (p.dominanceScore || 0) >= 420).length}</p>
         </div>
         <div className="bg-white/5 p-4 rounded">
-          <p className="text-xs uppercase tracking-widest text-white/50">Conflicts</p>
-          <p className="font-display text-3xl text-blood">${graph?.links?.filter((l) => l.type === "rivalry").length || 0}</p>
+          <p className="text-xs uppercase tracking-widest text-white/50">${view === "police" ? "Clean" : "Conflicts"}</p>
+          <p className="font-display text-3xl text-blood">${view === "police" ? police.filter(p => !p.isCorrupt).length : rivalryLinks.length}</p>
         </div>
       </div>
 
@@ -163,34 +172,47 @@ function NetworksPage({ dashboard, analytics, simulation, selectedNode, setSelec
       </div>
 
       <div className="bg-white/5 p-4 rounded mb-6" style=${{ minHeight: "400px" }}>
-        <${NetworkGraph} graph=${graph} mode=${view} selectedNode=${selectedNode} onSelectNode=${setSelectedNode} />
+        ${view === "hierarchy"
+          ? html`<${HierarchyGraph} root=${dashboard?.views?.hierarchy} onSelectNode=${setSelectedNode} />`
+          : html`<${NetworkGraph} graph=${graph} mode=${view} selectedNode=${selectedNode} onSelectNode=${setSelectedNode} />`
+        }
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-white/5 p-4 rounded">
-          <h3 className="font-bold uppercase tracking-widest mb-3 text-blood">Suspicious Officers</h3>
-          ${(analytics?.suspiciousPolice || []).map((officer, i) => html`
-            <div key=${officer._id || i} className="border-t border-white/10 py-2">
-              <p className="font-bold">${officer.name}</p>
-              <p className="text-sm text-white/50">${officer.rank} - Suspicion: ${Math.round((officer.suspiciousIndex || 0) * 100)}%</p>
-            </div>
-          `)}
+          <h3 className="font-bold uppercase tracking-widest mb-3 text-blood">${view === "police" ? "Corrupt Officers" : "Top operatives"}</h3>
+          ${view === "police" 
+            ? (analytics?.suspiciousPolice || []).map((officer, i) => html`
+              <div key=${officer._id || i} className="border-t border-white/10 py-2">
+                <p className="font-bold">${officer.name}</p>
+                <p className="text-sm text-white/50">${officer.rank} - Suspicion: ${Math.round((officer.suspiciousIndex || 0) * 100)}%</p>
+              </div>
+            `)
+            : viewNodes.slice(0, 5).map((p, i) => html`
+              <div key=${p._id || i} className="border-t border-white/10 py-2">
+                <p className="font-bold">${p.name}</p>
+                <p className="text-sm text-white/50">${p.rank || p.role} - Power: ${p.powerLevel || 0}</p>
+              </div>
+            `)
+          }
         </div>
 
         <div className="bg-white/5 p-4 rounded">
-          <h3 className="font-bold uppercase tracking-widest mb-3 text-blood">Predictions</h3>
-          ${analytics?.likelyBetrayal && html`
-            <div key="betrayal" className="border-t border-white/10 py-2">
-              <p className="font-bold">${analytics.likelyBetrayal.name}</p>
-              <p className="text-sm text-white/50">High betrayal risk</p>
-            </div>
-          `}
-          ${analytics?.nextDominantPlayer && html`
-            <div key="successor" className="border-t border-white/10 py-2">
-              <p className="font-bold">${analytics.nextDominantPlayer.name}</p>
-              <p className="text-sm text-white/50">Potential successor</p>
-            </div>
-          `}
+          <h3 className="font-bold uppercase tracking-widest mb-3 text-blood">${view === "police" ? "Clean Officers" : "Rivalries"}</h3>
+          ${view === "police"
+            ? police.filter(p => !p.isCorrupt).slice(0, 5).map((p, i) => html`
+              <div key=${p._id || i} className="border-t border-white/10 py-2">
+                <p className="font-bold">${p.name}</p>
+                <p className="text-sm text-white/50">${p.rank} - Integrity: ${p.integrityScore || 0}</p>
+              </div>
+            `)
+            : rivalryLinks.slice(0, 5).map((l, i) => html`
+              <div key=${l._id || i} className="border-t border-white/10 py-2">
+                <p className="font-bold text-blood">Tension: ${l.tensionScore || 0}</p>
+                <p className="text-sm text-white/50">High risk conflict</p>
+              </div>
+            `)
+          }
         </div>
       </div>
     </div>

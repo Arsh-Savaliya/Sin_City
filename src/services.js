@@ -51,8 +51,8 @@ async function refreshDominanceScores(personIds = null) {
   return people;
 }
 
-async function listPeople(filters = {}) {
-  const query = {};
+async function listPeople(userId, filters = {}) {
+  const query = { userId };
   if (filters.role) {
     query.role = filters.role;
   }
@@ -62,12 +62,12 @@ async function listPeople(filters = {}) {
   return Person.find(query).sort({ influenceScore: -1, name: 1 });
 }
 
-async function createPerson(payload) {
-  return Person.create(payload);
+async function createPerson(userId, payload) {
+  return Person.create({ ...payload, userId });
 }
 
-async function updatePerson(id, payload) {
-  const person = await Person.findByIdAndUpdate(id, payload, { new: true, runValidators: true });
+async function updatePerson(userId, id, payload) {
+  const person = await Person.findOneAndUpdate({ _id: id, userId }, payload, { new: true, runValidators: true });
   if (!person) {
     const error = new Error("Person not found");
     error.status = 404;
@@ -77,51 +77,50 @@ async function updatePerson(id, payload) {
     await Relationship.updateMany(
       {
         $or: [{ source: id }, { target: id }],
-        status: { $ne: "severed" }
+        status: { $ne: "severed" },
+        userId
       },
       {
         $set: { status: "weakening" },
         $mul: { weight: 0.45 }
       }
     );
-    await createEvent({
+    await createEvent(userId, {
       type: "elimination",
       headline: `${person.name} is dead`,
-      summary: `${person.name} was marked dead, weakening connected alliances and command structures.`,
+      summary: `${person.name} was marked dead`,
       actor: person._id,
       target: person._id,
       faction: person.faction
     });
-    if (person.isBoss) {
-      await handleSuccession(person);
-    }
   }
   return person;
 }
 
-async function deletePerson(id) {
-  const person = await Person.findByIdAndDelete(id);
+async function deletePerson(userId, id) {
+  const person = await Person.findOneAndDelete({ _id: id, userId });
   if (!person) {
     const error = new Error("Person not found");
     error.status = 404;
     throw error;
   }
   await Relationship.deleteMany({
-    $or: [{ source: id }, { target: id }]
+    $or: [{ source: id }, { target: id }],
+    userId
   });
   return person;
 }
 
-async function listCrimes() {
-  return Crime.find().populate("committedBy solvedBy").sort({ occurredAt: -1 });
+async function listCrimes(userId) {
+  return Crime.find({ userId }).populate("committedBy solvedBy").sort({ occurredAt: -1 });
 }
 
-async function createCrime(payload) {
-  return Crime.create(payload);
+async function createCrime(userId, payload) {
+  return Crime.create({ ...payload, userId });
 }
 
-async function updateCrime(id, payload) {
-  const crime = await Crime.findByIdAndUpdate(id, payload, {
+async function updateCrime(userId, id, payload) {
+  const crime = await Crime.findOneAndUpdate({ _id: id, userId }, payload, {
     new: true,
     runValidators: true
   });
@@ -133,16 +132,16 @@ async function updateCrime(id, payload) {
   return crime;
 }
 
-async function listRelationships() {
-  return Relationship.find().populate("source target").sort({ updatedAt: -1 });
+async function listRelationships(userId) {
+  return Relationship.find({ userId }).populate("source target").sort({ updatedAt: -1 });
 }
 
-async function createRelationship(payload) {
-  return Relationship.create(payload);
+async function createRelationship(userId, payload) {
+  return Relationship.create({ ...payload, userId });
 }
 
-async function updateRelationship(id, payload) {
-  const relationship = await Relationship.findByIdAndUpdate(id, payload, {
+async function updateRelationship(userId, id, payload) {
+  const relationship = await Relationship.findOneAndUpdate({ _id: id, userId }, payload, {
     new: true,
     runValidators: true
   });
@@ -154,8 +153,8 @@ async function updateRelationship(id, payload) {
   return relationship;
 }
 
-async function deleteRelationship(id) {
-  const relationship = await Relationship.findByIdAndDelete(id);
+async function deleteRelationship(userId, id) {
+  const relationship = await Relationship.findOneAndDelete({ _id: id, userId });
   if (!relationship) {
     const error = new Error("Relationship not found");
     error.status = 404;
@@ -164,12 +163,12 @@ async function deleteRelationship(id) {
   return relationship;
 }
 
-async function getDashboardGraph() {
+async function getDashboardGraph(userId) {
   const [people, relationships, crimes, events] = await Promise.all([
-    Person.find().lean(),
-    Relationship.find().populate("source target").lean(),
-    Crime.find().populate("committedBy solvedBy").sort({ occurredAt: -1 }).lean(),
-    Event.find().populate("actor target").sort({ happenedAt: -1 }).limit(30).lean()
+    Person.find({ userId }).lean(),
+    Relationship.find({ userId }).populate("source target").lean(),
+    Crime.find({ userId }).populate("committedBy solvedBy").sort({ occurredAt: -1 }).lean(),
+    Event.find({ userId }).populate("actor target").sort({ happenedAt: -1 }).limit(30).lean()
   ]);
 
   const criminals = people.filter((person) => person.role === "criminal");
@@ -257,12 +256,12 @@ function buildHierarchy(nodes, links) {
   return roots.length === 1 ? roots[0] : { name: "Syndicate", children: roots };
 }
 
-async function runRelationshipAnalysis() {
+async function runRelationshipAnalysis(userId) {
   const [people, relationships, crimes, events] = await Promise.all([
-    Person.find().lean(),
-    Relationship.find().lean(),
-    Crime.find().lean(),
-    Event.find().sort({ happenedAt: -1 }).limit(40).lean()
+    Person.find({ userId }).lean(),
+    Relationship.find({ userId }).lean(),
+    Crime.find({ userId }).lean(),
+    Event.find({ userId }).sort({ happenedAt: -1 }).limit(40).lean()
   ]);
 
   const relationMap = new Map();
@@ -835,30 +834,34 @@ async function generateEventNarrative({ type, headline, summary, actorId, target
   }
 }
 
-async function createEvent(payload) {
+async function createEvent(userIdOrPayload, payload) {
+  const actualPayload = payload || userIdOrPayload;
+  const actualUserId = payload ? userIdOrPayload : null;
+  
   const narrative = await generateEventNarrative({
-    type: payload.type,
-    headline: payload.headline,
-    summary: payload.summary,
-    actorId: payload.actor,
-    targetId: payload.target,
-    faction: payload.faction,
-    metadata: payload.metadata
+    type: actualPayload.type,
+    headline: actualPayload.headline,
+    summary: actualPayload.summary,
+    actorId: actualPayload.actor,
+    targetId: actualPayload.target,
+    faction: actualPayload.faction,
+    metadata: actualPayload.metadata
   });
 
   return Event.create({
-    ...payload,
+    ...actualPayload,
     headline: narrative.headline,
     summary: narrative.summary,
     metadata: {
-      ...(payload.metadata || {}),
+      ...(actualPayload.metadata || {}),
       narrationSource: narrative.source
-    }
+    },
+    ...(actualUserId && { userId: actualUserId })
   });
 }
 
-async function listEvents(limit = 25) {
-  return Event.find().populate("actor target").sort({ happenedAt: -1 }).limit(limit).lean();
+async function listEvents(userId, limit = 25) {
+  return Event.find({ userId }).populate("actor target").sort({ happenedAt: -1 }).limit(limit).lean();
 }
 
 async function getPopulationBalance() {
@@ -1532,7 +1535,269 @@ function emitGraphRefresh(io, reason) {
     } catch (error) {
       console.error("Failed to emit graph refresh", error);
     }
-  }, 50);
+}, 50);
+}
+
+const JWT_SECRET = process.env.JWT_SECRET || "black-horizon-secret-key-change-in-production";
+
+function generateToken(user) {
+  const jwt = require("jsonwebtoken");
+  return jwt.sign(
+    { userId: user._id, username: user.username, role: user.role },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+}
+
+async function registerUser({ username, email, password }) {
+  const { User } = require("./models");
+  
+  const existingUser = await User.findOne({
+    $or: [{ username }, { email }]
+  });
+  if (existingUser) {
+    const error = new Error("Username or email already exists");
+    error.status = 400;
+    throw error;
+  }
+
+  const user = await User.create({ username, email, password });
+  const token = generateToken(user);
+  
+  // Initialize starter world for new user
+  await createStarterWorld(user._id);
+
+  return {
+    user: { _id: user._id, username: user.username, email: user.email, role: user.role },
+    token
+  };
+}
+
+async function loginUser({ email, password }) {
+  const { User } = require("./models");
+  
+  const user = await User.findOne({ email });
+  if (!user) {
+    const error = new Error("Invalid credentials");
+    error.status = 401;
+    throw error;
+  }
+
+  if (!user.comparePassword(password)) {
+    const error = new Error("Invalid credentials");
+    error.status = 401;
+    throw error;
+  }
+
+  user.lastLogin = new Date();
+  await user.save();
+
+  const token = generateToken(user);
+  
+  return {
+    user: { _id: user._id, username: user.username, email: user.email, role: user.role },
+    token
+  };
+}
+
+function authenticateToken(req, res, next) {
+  const jwt = require("jsonwebtoken");
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    const error = new Error("No token provided");
+    error.status = 401;
+    return next(error);
+  }
+
+  const token = authHeader.split(" ")[1];
+  
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (error) {
+    const err = new Error("Invalid token");
+    err.status = 401;
+    next(err);
+  }
+}
+
+async function createStarterWorld(userId) {
+  const { Person, Crime, Relationship, Event } = require("./models");
+
+  const people = await Person.insertMany([
+    {
+      name: "Marcus Vale",
+      alias: "The Shadow",
+      role: "criminal",
+      faction: "Vale Syndicate",
+      rank: "Boss",
+      money: 5000000,
+      powerLevel: 850,
+      loyaltyScore: 90,
+      ambitionLevel: 60,
+      fearFactor: 92,
+      intelligenceLevel: 85,
+      influenceScore: 95,
+      isBoss: true,
+      status: "alive",
+      weaknessTags: ["ego"],
+      userId,
+      backgroundTier: "powerful",
+      backgroundSummary: "A ruthless crime lord who built an empire from the shadows.",
+      backstory: "Marcus Vale rose from nothing to control half the city's underworld."
+    },
+    {
+      name: "Diana Chen",
+      alias: "Ice Queen",
+      role: "criminal",
+      faction: "Vale Syndicate",
+      rank: "Underboss",
+      money: 1800000,
+      powerLevel: 680,
+      loyaltyScore: 85,
+      ambitionLevel: 75,
+      fearFactor: 70,
+      intelligenceLevel: 90,
+      influenceScore: 78,
+      status: "alive",
+      weaknessTags: ["loyalty conflict"],
+      userId,
+      backgroundTier: "balanced",
+      backgroundSummary: "Strategic and calculating, Diana is Marcus's right hand."
+    },
+    {
+      name: "Rex Nolan",
+      alias: "Trigger",
+      role: "criminal",
+      faction: "Vale Syndicate",
+      rank: "Lieutenant",
+      money: 450000,
+      powerLevel: 450,
+      loyaltyScore: 55,
+      ambitionLevel: 85,
+      fearFactor: 88,
+      intelligenceLevel: 65,
+      influenceScore: 52,
+      status: "alive",
+      weaknessTags: ["greed"],
+      userId,
+      backgroundTier: "balanced",
+      backgroundSummary: "A violent enforcer known for extreme methods."
+    },
+    {
+      name: "Captain Sarah Blake",
+      role: "police",
+      faction: "City PD",
+      rank: "Captain",
+      cases: 18,
+      casesSolved: 14,
+      powerLevel: 420,
+      loyaltyScore: 88,
+      fearFactor: 55,
+      intelligenceLevel: 80,
+      integrityScore: 85,
+      status: "alive",
+      weaknessTags: [],
+      userId
+    },
+    {
+      name: "Detective Mike Ross",
+      role: "police",
+      faction: "City PD",
+      rank: "Detective",
+      cases: 12,
+      casesSolved: 8,
+      powerLevel: 320,
+      loyaltyScore: 45,
+      fearFactor: 40,
+      intelligenceLevel: 72,
+      integrityScore: 35,
+      isCorrupt: true,
+      status: "alive",
+      weaknessTags: ["greed"],
+      userId
+    }
+  ]);
+
+  const lookup = Object.fromEntries(people.map(p => [p.name, p]));
+
+  await Relationship.insertMany([
+    {
+      source: lookup["Marcus Vale"]._id,
+      target: lookup["Diana Chen"]._id,
+      type: "command",
+      weight: 5,
+      tensionScore: 25,
+      userId
+    },
+    {
+      source: lookup["Marcus Vale"]._id,
+      target: lookup["Rex Nolan"]._id,
+      type: "command",
+      weight: 3,
+      tensionScore: 45,
+      userId
+    },
+    {
+      source: lookup["Diana Chen"]._id,
+      target: lookup["Rex Nolan"]._id,
+      type: "alliance",
+      weight: 2,
+      tensionScore: 55,
+      userId
+    },
+    {
+      source: lookup["Captain Sarah Blake"]._id,
+      target: lookup["Detective Mike Ross"]._id,
+      type: "official",
+      weight: 2,
+      tensionScore: 15,
+      userId
+    },
+    {
+      source: lookup["Detective Mike Ross"]._id,
+      target: lookup["Marcus Vale"]._id,
+      type: "corruption",
+      weight: 4,
+      tensionScore: 70,
+      userId
+    }
+  ]);
+
+  const shortId = Math.random().toString(36).substring(2, 6).toUpperCase();
+  await Crime.insertMany([
+    {
+      crimeId: `BH-${shortId}`,
+      title: "Harbor Heist",
+      category: "Theft",
+      status: "investigating",
+      committedBy: [lookup["Marcus Vale"]._id, lookup["Rex Nolan"]._id],
+      occurredAt: new Date(),
+      district: "Harbor District",
+      summary: "Major weapons shipment stolen from the docks.",
+      userId
+    }
+  ]);
+
+  await Event.insertMany([
+    {
+      type: "simulation",
+      headline: "The city awakens",
+      summary: "Your new empire begins. The underworld awaits your command.",
+      actor: lookup["Marcus Vale"]._id,
+      faction: "Vale Syndicate",
+      userId
+    }
+  ]);
+
+  return { people, relationships: await Relationship.find({ userId }), crimes: await Crime.find({ userId }) };
+}
+
+// Add userId to all queries
+function withUserId(query) {
+  return { ...query, userId: null };
 }
 
 module.exports = {
@@ -1564,5 +1829,8 @@ module.exports = {
   setSimulationRunning,
   getSimulationState,
   emitGraphRefresh,
-  isGeminiConfigured
+  isGeminiConfigured,
+  registerUser,
+  loginUser,
+  authenticateToken
 };
