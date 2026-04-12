@@ -1,121 +1,104 @@
-# Sin City Network
+# Nocturne
 
-Sin City Network is a full-stack crime intelligence platform with a noir interface, realtime graph updates, REST APIs, and an AI-style analytics layer for detecting hidden ties and suspicious officers.
+Nocturne is a Sin City themed crime-intelligence web app built for HackNite 2026.  
+It mixes a live criminal network, police corruption tracking, AI-generated world events, and a simple deduction game where the user must identify a hidden culprit from clues in the feed.
 
-## Stack
+## Problem Statement
 
-- Frontend: HTML, TailwindCSS via CDN, custom CSS, vanilla JavaScript
-- Visualization: D3.js force graphs, tree graph, and heatmap
-- Backend: Node.js, Express.js
-- Database: MongoDB with Mongoose
-- Realtime: Socket.io
-- AI: logic-based analytics engine for hidden relationship detection, influence scoring, and police corruption suspicion
-- Optional narrative API: Google Gemini in hybrid mode for richer character lore and event narration
-- Simulation: KGF-style power dynamics engine with succession, betrayal, outsider rise, and event timeline
+Crime data is usually hard to read when it is spread across logs, case notes, and disconnected profiles.  
+Nocturne turns that chaos into one readable interface where an operator can:
 
-## Features
+- watch the city evolve in real time
+- inspect relationships between criminals and police
+- follow AI feed clues
+- solve the active culprit hunt before the three guesses run out
 
-- Criminal force-directed network graph with cinematic hover states, tooltips, linked-node highlighting, and profile drawer
-- Power dynamics graph with dominance-driven sizing, heir logic, outsider growth, and tension-heavy rivalries
-- Criminal hierarchy tree view
-- Police network view
-- Corruption hybrid graph with color-coded edge semantics
-- Crime record system with create and update workflows
-- Live graph refresh when people or crimes change
-- Dead-status propagation that weakens ties in realtime
-- Search, role filters, timeline slider, district crime heatmap, and unstable hierarchy panel
-- Story timeline with simulation events such as assassinations, betrayals, raids, and successions
-- AI-generated new characters can enter unstable factions or emerge as outsiders over time
-- AI-generated characters now arrive with a background tier and full backstory, and the simulation will bias toward lethal corrections when new arrivals outpace deaths by too much
-- If `GEMINI_API_KEY` is present, new character lore and major event narration are enriched by Gemini with automatic fallback to the local generator
-- Play/pause simulation controls plus user-triggered promote, eliminate, and manual event tick actions
-- Responsive layout tuned for phones, tablets, and desktop screens
+## Why It Fits The Theme
+
+- Noir visual language with a Sin City atmosphere
+- Criminal empires, corrupt officers, rivalries, murders, and case files
+- Hidden culprit gameplay layered on top of a living underworld simulation
+
+## Core Features
+
+- Authentication with per-user worlds
+- Live criminal, police, and corruption network views
+- AI feed that logs world events, clue drops, case creation, case solving, deaths, and power recalibration
+- Editable operator profile
+- Hidden culprit game with 3 guesses and restart flow
+- 40-second autonomous AI tick plus manual force tick
+- Responsive dashboard built for desktop and mobile
+
+## Tech Stack
+
+- Frontend: React via browser modules + TailwindCSS
+- Backend: Node.js + Express
+- Database: MongoDB + Mongoose
+- Realtime refresh: Socket.IO
+- Auth: JWT
+- AI layer: local simulation logic only
 
 ## Project Structure
 
 ```text
 .
-├── public
-│   ├── css
-│   │   └── styles.css
-│   ├── js
-│   │   ├── api.js
-│   │   ├── app.js
-│   │   └── graphs
-│   │       ├── forceGraph.js
-│   │       ├── heatmap.js
-│   │       └── treeGraph.js
-│   └── index.html
-├── src
-│   ├── config
-│   │   └── db.js
-│   ├── controllers
-│   ├── models
-│   ├── routes
-│   ├── seed
-│   │   └── seedData.js
-│   ├── services
-│   ├── socket
-│   └── utils
-├── .env.example
-├── package.json
-├── README.md
-└── server.js
+|-- public
+|   |-- css
+|   |-- index.html
+|   `-- react
+|       |-- api
+|       |-- components
+|       |-- data
+|       |-- hooks
+|       |-- lib
+|       |-- utils
+|       |-- app.js
+|       `-- main.js
+|-- src
+|   |-- models.js
+|   |-- seed
+|   `-- services.js
+|-- server.js
+|-- package.json
+`-- README.md
 ```
 
 ## Local Setup
 
-1. Install MongoDB locally and make sure it is running.
-2. Copy `.env.example` to `.env`.
-3. Optional: add a Gemini API key to `.env` for hybrid narrative generation.
-4. Install dependencies:
+1. Create a `.env` file.
+2. Add your MongoDB connection string and JWT secret.
+3. Install dependencies:
 
 ```bash
 npm install
 ```
 
-5. Start the app:
+4. Start the app:
 
 ```bash
 npm run dev
 ```
 
-6. Open [http://localhost:5000](http://localhost:5000).
+5. Open [http://localhost:5000](http://localhost:5000)
 
-The app auto-seeds the database on first boot.
-
-Optional Gemini environment variables:
+## Example `.env`
 
 ```env
-GEMINI_API_KEY=your_google_ai_studio_key
-GEMINI_MODEL=gemini-2.5-flash
+MONGODB_URI=mongodb://127.0.0.1:27017/nocturne
+JWT_SECRET=change-this-secret
+PORT=5000
 ```
 
-If you already ran an older version of the project, clear the old `sin-city` database first so the new power-dynamics fields and seed events load cleanly.
+## Main API Routes
 
-## API Surface
+### Auth
 
-### People
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `PATCH /api/auth/me`
 
-- `GET /api/people`
-- `POST /api/people`
-- `PATCH /api/people/:id`
-- `DELETE /api/people/:id`
-
-### Relationships
-
-- `GET /api/relationships`
-- `POST /api/relationships`
-- `PATCH /api/relationships/:id`
-- `DELETE /api/relationships/:id`
-
-### Crimes
-
-- `GET /api/crimes`
-- `POST /api/crimes`
-- `PATCH /api/crimes/:id`
-
-### Dashboard and AI
+### Dashboard
 
 - `GET /api/dashboard/graph`
 - `GET /api/dashboard/analytics`
@@ -123,12 +106,27 @@ If you already ran an older version of the project, clear the old `sin-city` dat
 - `GET /api/dashboard/simulation`
 - `POST /api/dashboard/simulation/toggle`
 - `POST /api/dashboard/simulation/tick`
-- `POST /api/dashboard/characters/:id/promote`
-- `POST /api/dashboard/characters/:id/eliminate`
+- `POST /api/dashboard/culprit/guess`
+- `POST /api/dashboard/culprit/restart`
 
-## Notes
+## Judge Demo Flow
 
-- Framer Motion was not added because this build uses a non-React frontend; motion is handled with CSS and D3 transitions instead.
-- Tailwind is loaded through the CDN for a simpler local setup without a frontend build step.
-- The simulation engine runs automatically every 18 seconds by default and also supports manual triggering from the UI.
-- Gemini is used only as a narrative enrichment layer in hybrid mode; the deterministic local simulation remains the source of truth for kills, succession, power shifts, and balancing.
+1. Log in as an operator.
+2. Open the network and show live criminal/police relationships.
+3. Show the AI feed generating clues and world events.
+4. Open `User Details` and make a culprit guess.
+5. Force a tick to show the world update instantly.
+
+## Deployment Notes
+
+- Frontend + backend can be served together from the Express app.
+- Recommended hosting: Render for the app and MongoDB Atlas for the database.
+- Keep secrets in environment variables only.
+
+## What Makes This Submission Strong
+
+- Clear Sin City theme fit
+- Full frontend-backend-database-auth flow
+- Simple but interesting gameplay loop
+- Clean, modular project structure
+- Easy to demo in a short judging window
