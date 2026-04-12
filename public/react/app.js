@@ -170,7 +170,7 @@ export function App() {
               <${Icons.triangle} direction=${sidebarOpen ? "left" : "right"} className="h-5 w-5" />
             </button>
             <div>
-              <h1 className="font-display text-3xl uppercase tracking-[0.18em] text-blood">NOCTURNE</h1>
+              <h1 className="font-display text-3xl uppercase tracking-[0.18em] text-blood">VELVET n VICE</h1>
               <p className="text-xs uppercase tracking-widest text-white/40 mt-1">Local simulation engine</p>
             </div>
           </div>
@@ -232,7 +232,7 @@ function NetworksPage({ dashboard, analytics, simulation, selectedNode, setSelec
       text: "Operators need a fast way to understand shifting crime networks instead of reading raw case files."
     },
     {
-      label: "What Nocturne Does",
+      label: "What VELVET n VICE Does",
       text: "It turns a Sin City underworld into a live, playable intelligence board with clues, cases, and character movement."
     },
     {

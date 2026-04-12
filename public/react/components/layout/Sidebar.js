@@ -18,7 +18,7 @@ export function Sidebar({ currentPage, onNavigate, userProfile, onLogout, isOpen
     >
         <div className="mb-8">
           <div>
-            <p className="font-display text-3xl uppercase tracking-[0.18em] text-blood">NOCTURNE</p>
+            <p className="font-display text-3xl uppercase tracking-[0.18em] text-blood">VELVET n VICE</p>
             <p className="text-xs uppercase tracking-widest text-white/50 mt-1">Intelligence Unit</p>
           </div>
         </div>
