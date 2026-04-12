@@ -1,84 +1,50 @@
-import { html, motion } from "../../lib/html.js";
-import { Icons } from "./icons.js";
+import { html } from "../../lib/html.js";
 
-const { NavLink } = window.ReactRouterDOM;
 const navItems = [
-  { to: "/networks", label: "Networks", icon: Icons.network },
-  { to: "/pressure-map", label: "Pressure Map", icon: Icons.heat },
-  { to: "/unstable-hierarchies", label: "Unstable Hierarchies", icon: Icons.hierarchy },
-  { to: "/crime-records", label: "Crime Record System", icon: Icons.records },
-  { to: "/messages", label: "Messages", icon: Icons.message },
-  { to: "/user-details", label: "User Details", icon: Icons.user }
+  { key: "networks", label: "Networks" },
+  { key: "pressure-map", label: "Pressure Map" },
+  { key: "unstable-hierarchies", label: "Unstable Hierarchies" },
+  { key: "crime-records", label: "Crime Records" },
+  { key: "messages", label: "Messages" },
+  { key: "user-details", label: "User Details" }
 ];
 
-export function Sidebar({ collapsed, mobileOpen, setCollapsed, setMobileOpen, userProfile }) {
+export function Sidebar({ currentPage, onNavigate, userProfile }) {
   return html`
-    <${motion.aside}
-      initial=${false}
-      animate=${{
-        width: collapsed ? 92 : 280,
-        x: mobileOpen ? 0 : 0
-      }}
-      transition=${{ type: "spring", stiffness: 210, damping: 24 }}
-      className=${`sidebar-shell ${mobileOpen ? "is-mobile-open" : ""}`}
-    >
-      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-5 py-5">
-        <div className=${collapsed ? "hidden" : "block"}>
-          <p className="font-display text-5xl uppercase tracking-[0.08em] text-blood">Sincity</p>
-          <p className="text-[0.68rem] uppercase tracking-[0.28em] text-white/45">Truth lies in the shadows</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="sidebar-toggle hidden lg:inline-flex"
-            onClick=${() => setCollapsed(!collapsed)}
-            aria-label=${collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            ${collapsed ? Icons.expand() : Icons.collapse()}
-          </button>
-          <button
-            type="button"
-            className="sidebar-toggle lg:hidden"
-            onClick=${() => setMobileOpen(false)}
-            aria-label="Close sidebar"
-          >
-            ${Icons.collapse()}
-          </button>
-        </div>
+    <aside className="w-64 bg-white/5 border-r border-white/10 min-h-screen p-4">
+      <div className="mb-8">
+        <p className="font-display text-4xl uppercase tracking-widest text-blood">Sin City</p>
+        <p className="text-xs uppercase tracking-widest text-white/50 mt-1">Intelligence Unit</p>
       </div>
 
-      <nav className="flex-1 space-y-2 px-4 py-6">
-        ${navItems.map(
-          (item) => html`
-            <${NavLink}
-              to=${item.to}
-              onClick=${() => setMobileOpen(false)}
-              className=${({ isActive }) =>
-                `sidebar-link ${isActive ? "is-active" : ""} ${collapsed ? "is-collapsed" : ""}`}
-            >
-              <span className="sidebar-icon">${item.icon()}</span>
-              ${!collapsed && html`<span>${item.label}</span>`}
-            </${NavLink}>
-          `
-        )}
+      <nav className="space-y-2">
+        ${navItems.map((item) => html`
+          <button
+            key=${item.key}
+            type="button"
+            onClick=${() => onNavigate(item.key)}
+            className=${`w-full text-left px-4 py-3 rounded uppercase text-sm tracking-wider ${
+              currentPage === item.key
+                ? "bg-blood/20 text-blood border border-blood/30"
+                : "text-white/70 hover:bg-white/10 hover:text-white"
+            }`}
+          >
+            ${item.label}
+          </button>
+        `)}
       </nav>
 
-      <div className="border-t border-white/10 px-4 py-5">
-        <div className=${`rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-4 ${collapsed ? "text-center" : ""}`}>
-          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full border border-blood/30 bg-blood/[0.16] text-lg font-bold text-white">
-            ${(userProfile?.name || "JM")
-              .split(" ")
-              .map((part) => part[0])
-              .join("")
-              .slice(0, 2)}
+      <div className="mt-8 pt-4 border-t border-white/10">
+        <div className="flex items-center gap-3 px-2">
+          <div className="w-10 h-10 rounded-full bg-blood/30 flex items-center justify-center text-white font-bold">
+            ${(userProfile?.name || "JM").split(" ").map(p => p[0]).join("").slice(0,2)}
           </div>
-          ${!collapsed &&
-          html`
-            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-white">${userProfile?.name || "J. Marlowe"}</p>
-            <p className="mt-1 text-xs uppercase tracking-[0.18em] text-white/45">${userProfile?.role || "Field Analyst"}</p>
-          `}
+          <div>
+            <p className="text-sm font-bold uppercase tracking-wider">${userProfile?.name || "J. Marlowe"}</p>
+            <p className="text-xs text-white/50 uppercase">${userProfile?.role || "Operator"}</p>
+          </div>
         </div>
       </div>
-    </${motion.aside}>
+    </aside>
   `;
 }

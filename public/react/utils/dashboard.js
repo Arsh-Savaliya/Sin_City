@@ -1,140 +1,136 @@
 export const viewOptions = [
-  { key: "criminal", label: "Criminal Network" },
-  { key: "police", label: "Police Network" },
-  { key: "hierarchy", label: "Hierarchy Graph" },
-  { key: "corruption", label: "Corruption Graph" }
+  { key: "criminal", label: "Network" },
+  { key: "corruption", label: "Corruption" },
+  { key: "power", label: "Power" },
+  { key: "police", label: "Police" },
+  { key: "hierarchy", label: "Hierarchy" }
 ];
 
 export function getGraphForView(dashboard, view) {
-  const fallback = { nodes: [], links: [] };
-  if (!dashboard?.views) {
-    return fallback;
+  if (!dashboard) {
+    return { nodes: [], links: [] };
   }
 
-  if (view === "criminal") {
-    return dashboard.views.criminalNetwork || fallback;
-  }
+  const viewMap = {
+    criminal: dashboard.views?.criminalNetwork,
+    corruption: dashboard.views?.corruptionNetwork,
+    power: dashboard.views?.powerNetwork,
+    police: dashboard.views?.policeNetwork
+  };
 
-  if (view === "police") {
-    return dashboard.views.policeNetwork || fallback;
-  }
-
-  if (view === "corruption") {
-    return dashboard.views.corruptionNetwork || fallback;
-  }
-
-  if (view === "power") {
-    return dashboard.views.powerNetwork || fallback;
-  }
-
-  return fallback;
+  return viewMap[view] || { nodes: [], links: [] };
 }
 
-export function getRiskLevel(score = 0) {
-  if (score >= 0.75 || score >= 75) {
-    return "High";
+export function getRiskLevel(index) {
+  if (index >= 0.7) {
+    return "HIGH";
   }
-  if (score >= 0.45 || score >= 45) {
-    return "Medium";
+  if (index >= 0.4) {
+    return "MEDIUM";
   }
-  return "Low";
-}
-
-export function clampPercent(value = 0, scale = 1) {
-  const ratio = scale === 1 ? value : value / scale;
-  return Math.max(0, Math.min(100, Math.round(ratio * 100)));
-}
-
-export function getInfluenceColor(node) {
-  const dominance = node?.dominanceScore || 0;
-  const influence = node?.influenceScore || 0;
-  if (node?.status === "dead") {
-    return "#505050";
-  }
-  if (dominance >= 460 || influence >= 70) {
-    return "#ff2a2a";
-  }
-  if (dominance < 220 || influence < 35) {
-    return "#6a6a6a";
-  }
-  return "#f5f5f5";
-}
-
-export function initials(name = "?") {
-  return name
-    .split(" ")
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() || "")
-    .join("");
-}
-
-export function formatTime(value) {
-  if (!value) {
-    return "Unknown";
-  }
-
-  return new Date(value).toLocaleString();
+  return "LOW";
 }
 
 export function mapPredictionCards(analytics) {
+  if (!analytics) {
+    return [];
+  }
+
   const predictions = [];
 
-  if (analytics?.nextDominantPlayer) {
+  if (analytics.likelyBetrayal) {
     predictions.push({
-      id: "next-dominant",
-      title: "Next Dominant Player",
-      description: `${analytics.nextDominantPlayer.name} is positioned to dominate the next shift.`,
-      probability: clampPercent(analytics.nextDominantPlayer.risePotential || 0.74)
+      title: analytics.likelyBetrayal.name,
+      description: `High ambition (${analytics.likelyBetrayal.ambitionLevel}) with low loyalty (${analytics.likelyBetrayal.loyaltyScore}) signals potential betrayal.`,
+      probability: Math.round((analytics.likelyBetrayal.betrayalRisk || 0.65) * 100)
     });
   }
 
-  if (analytics?.likelyBetrayal) {
+  if (analytics.nextDominantPlayer) {
     predictions.push({
-      id: "likely-betrayal",
-      title: "Likely Betrayal",
-      description: `${analytics.likelyBetrayal.name} shows the sharpest betrayal pattern in the network.`,
-      probability: clampPercent(analytics.likelyBetrayal.betrayalRisk || 0.67)
-    });
-  }
-
-  const unstable = analytics?.unstableHierarchies?.[0];
-  if (unstable) {
-    predictions.push({
-      id: "unstable-faction",
-      title: "Hierarchy Fracture",
-      description: `${unstable.faction} is drifting into a power vacuum.`,
-      probability: clampPercent(unstable.instabilityScore || 0.61)
+      title: analytics.nextDominantPlayer.name,
+      description: `Rising power with high ambition and strong intelligence profile. Ready for ascension.`,
+      probability: Math.round((analytics.nextDominantPlayer.risePotential || 0.55) * 100)
     });
   }
 
   return predictions;
 }
 
+export function formatTime(dateString) {
+  if (!dateString) {
+    return "Unknown";
+  }
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) {
+    return "Unknown";
+  }
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
 export function buildMessages(analytics, events, mockMessages) {
-  const eventMessages = (events || []).slice(0, 4).map((event) => ({
-    id: event._id,
-    sender: "Event Engine",
-    subject: event.headline,
-    body: event.summary,
-    priority:
-      event.type === "assassination" || event.type === "takeover" || event.type === "elimination"
-        ? "high"
-        : "medium",
-    timestamp: event.happenedAt
-  }));
+  const messages = [...(mockMessages || [])];
 
-  const surveillanceMessages = (analytics?.suspiciousPolice || []).slice(0, 2).map((officer) => ({
-    id: `${officer._id || officer.name}-watch`,
-    sender: "AI Surveillance",
-    subject: `${officer.name} flagged`,
-    body:
-      officer.reason ||
-      `${officer.name} has entered the corruption watchlist with a ${getRiskLevel(
-        officer.suspiciousIndex || 0
-      )} risk profile.`,
-    priority: getRiskLevel(officer.suspiciousIndex || 0).toLowerCase(),
-    timestamp: new Date().toISOString()
-  }));
+  if (events && events.length > 0) {
+    events.slice(0, 3).forEach((event) => {
+      let priority = "low";
+      if (event.type === "assassination" || event.type === "takeover") {
+        priority = "high";
+      } else if (event.type === "betrayal" || event.type === "alliance") {
+        priority = "medium";
+      }
 
-  return [...eventMessages, ...surveillanceMessages, ...mockMessages].slice(0, 8);
+      messages.push({
+        id: event._id || `evt-${Date.now()}`,
+        sender: "Event Engine",
+        subject: event.headline || "Unknown Event",
+        body: event.summary || "",
+        priority,
+        timestamp: event.happenedAt || new Date().toISOString()
+      });
+    });
+  }
+
+  return messages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+}
+
+export function clampPercent(value, max = 1) {
+  if (!value) {
+    return 0;
+  }
+  return Math.round(Math.min(max, Math.max(0, value)) * 100);
+}
+
+export function initials(name) {
+  if (!name) {
+    return "?";
+  }
+  return name
+    .split(" ")
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+export function getInfluenceColor(person) {
+  const score = person?.dominanceScore || person?.influenceScore || person?.powerLevel || 0;
+  if (score >= 800) {
+    return "rgba(255,42,42,0.95)";
+  }
+  if (score >= 600) {
+    return "rgba(255,42,42,0.72)";
+  }
+  if (score >= 400) {
+    return "rgba(255,210,80,0.85)";
+  }
+  if (score >= 200) {
+    return "rgba(245,245,245,0.65)";
+  }
+  return "rgba(245,245,245,0.35)";
 }
