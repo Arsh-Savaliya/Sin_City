@@ -24,6 +24,7 @@ const {
   listEvents,
   runSimulationTick,
   guessCulprit,
+  restartCulpritGame,
   startSimulation,
   setSimulationRunning,
   getSimulationState,
@@ -165,6 +166,11 @@ dashboardRouter.post("/simulation/tick", asyncHandler(async (req, res) => {
 dashboardRouter.post("/culprit/guess", asyncHandler(async (req, res) => {
   const result = await guessCulprit(userIdFromRequest(req), req.body.suspectId);
   await emitGraphRefresh(req.app.get("io"), "culprit-guess");
+  res.json(result);
+}));
+dashboardRouter.post("/culprit/restart", asyncHandler(async (req, res) => {
+  const result = await restartCulpritGame(userIdFromRequest(req));
+  await emitGraphRefresh(req.app.get("io"), "culprit-restart");
   res.json(result);
 }));
 

@@ -53,7 +53,7 @@ async function refreshDominanceScores(personIds = null, userId = null) {
 }
 
 async function listPeople(userId, filters = {}) {
-  const query = { userId };
+  const query = { userId, isInWorld: { $ne: false } };
   if (filters.role) {
     query.role = filters.role;
   }
@@ -166,20 +166,22 @@ async function deleteRelationship(userId, id) {
 
 async function getDashboardGraph(userId) {
   const [peopleRaw, relationships, crimesRaw, eventsRaw] = await Promise.all([
-    Person.find({ userId }).lean(),
+    Person.find({ userId, isInWorld: { $ne: false } }).lean(),
     Relationship.find({ userId }).populate("source target").lean(),
     Crime.find({ userId }).populate("committedBy solvedBy").sort({ occurredAt: -1 }).lean(),
     Event.find({ userId }).populate("actor target").sort({ happenedAt: -1 }).limit(30).lean()
   ]);
 
-  const sanitizedRelationships = (relationships || []).map((relationship) => ({
-    ...relationship,
-    source: sanitizePersonForClient(relationship.source),
-    target: sanitizePersonForClient(relationship.target)
-  }));
+  const sanitizedRelationships = (relationships || [])
+    .map((relationship) => ({
+      ...relationship,
+      source: sanitizePersonForClient(relationship.source),
+      target: sanitizePersonForClient(relationship.target)
+    }))
+    .filter((relationship) => relationship.source && relationship.target);
   const crimes = (crimesRaw || []).map((crime) => ({
     ...crime,
-    committedBy: (crime.committedBy || []).map((person) => sanitizePersonForClient(person)),
+    committedBy: (crime.committedBy || []).map((person) => sanitizePersonForClient(person)).filter(Boolean),
     solvedBy: sanitizePersonForClient(crime.solvedBy)
   }));
   const events = (eventsRaw || []).map((event) => ({
@@ -298,17 +300,21 @@ function sanitizePersonForClient(person) {
     return person;
   }
 
+  if (person.isInWorld === false) {
+    return null;
+  }
+
   const { isCulprit, clueProfile, ...safePerson } = person;
   return safePerson;
 }
 
 function sanitizePeopleForClient(people) {
-  return (people || []).map((person) => sanitizePersonForClient(person));
+  return (people || []).map((person) => sanitizePersonForClient(person)).filter(Boolean);
 }
 
 async function runRelationshipAnalysis(userId) {
   const [peopleRaw, relationships, crimes, events] = await Promise.all([
-    Person.find({ userId }).lean(),
+    Person.find({ userId, isInWorld: { $ne: false } }).lean(),
     Relationship.find({ userId }).lean(),
     Crime.find({ userId }).lean(),
     Event.find({ userId }).sort({ happenedAt: -1 }).limit(40).lean()
@@ -1589,7 +1595,7 @@ async function runSimulationTick(userIdOrReason = "auto", maybeReason = null) {
   await increaseTension(userId);
 
   const [criminalCount, unsolvedCaseCount] = await Promise.all([
-    Person.countDocuments(withOptionalUserId(userId, { role: "criminal", status: "alive" })),
+    Person.countDocuments(withOptionalUserId(userId, { role: "criminal", status: "alive", isInWorld: { $ne: false } })),
     Crime.countDocuments(withOptionalUserId(userId, { status: { $in: ["open", "investigating"] } }))
   ]);
   let balance = await getPopulationBalance(userId);
@@ -1709,14 +1715,13 @@ async function ensureCulpritForUser(userId) {
     }
   }
 
-  const anchor = await Person.findOne({ userId, role: "criminal", status: "alive" }).sort({ influenceScore: -1, powerLevel: -1 });
   const profile = backgroundProfiles.balanced;
   const culprit = await Person.create({
     userId,
     name: await uniqueGeneratedName(),
     alias: pickRandom(aliases),
     role: "criminal",
-    faction: anchor?.faction || "Independent",
+    faction: "Independent",
     rank: "Fixer",
     money: randomInt(profile.money[0], profile.money[1]),
     cases: randomInt(1, 3),
@@ -1728,6 +1733,7 @@ async function ensureCulpritForUser(userId) {
     ambitionLevel: randomInt(68, 96),
     fearFactor: randomInt(38, 82),
     intelligenceLevel: randomInt(64, 92),
+    isInWorld: false,
     isOutsider: Math.random() > 0.65,
     isCulprit: true,
     clueProfile: {
@@ -1738,21 +1744,9 @@ async function ensureCulpritForUser(userId) {
     },
     weaknessTags: pickWeaknesses(),
     backgroundTier: "balanced",
-    backgroundSummary: "A hidden culprit seeded into the city as the user's active target.",
+    backgroundSummary: "A hidden culprit seeded into the city but still operating beyond the visible network.",
     backstory: "This operator entered the city with enough connections to stay useful and enough caution to avoid early suspicion."
   });
-
-  if (anchor) {
-    await Relationship.create({
-      userId,
-      source: culprit._id,
-      target: anchor._id,
-      type: Math.random() > 0.45 ? "alliance" : "transaction",
-      weight: 2,
-      tensionScore: 34,
-      details: `${culprit.name} slipped into ${anchor.name}'s orbit without drawing immediate heat.`
-    });
-  }
 
   user.culpritPersonId = culprit._id;
   user.culpritClueStage = 0;
@@ -1761,15 +1755,46 @@ async function ensureCulpritForUser(userId) {
   user.culpritRevealedName = null;
   await user.save();
 
-  await createEvent(userId, {
-    type: "simulation",
-    headline: "A hidden culprit enters the city",
-    summary: "Intelligence flagged a fresh operator moving beneath the surface. The feed will start dropping clues if you watch carefully.",
-    actor: culprit._id,
-    faction: culprit.faction,
-    metadata: { gameStart: true }
-  });
-  await dropCulpritClue(userId);
+  return culprit;
+}
+
+async function surfaceCulpritInWorld(userId, culprit) {
+  if (!culprit || culprit.isInWorld !== false) {
+    return culprit;
+  }
+
+  culprit.isInWorld = true;
+  await culprit.save();
+
+  const anchor = await Person.findOne({
+    userId,
+    role: "criminal",
+    status: "alive",
+    isInWorld: { $ne: false },
+    _id: { $ne: culprit._id }
+  }).sort({ influenceScore: -1, powerLevel: -1 });
+
+  if (anchor) {
+    const existingLink = await Relationship.findOne({
+      userId,
+      $or: [
+        { source: culprit._id, target: anchor._id },
+        { source: anchor._id, target: culprit._id }
+      ]
+    });
+
+    if (!existingLink) {
+      await Relationship.create({
+        userId,
+        source: culprit._id,
+        target: anchor._id,
+        type: Math.random() > 0.45 ? "alliance" : "transaction",
+        weight: 2,
+        tensionScore: 34,
+        details: `${culprit.name} surfaced inside ${anchor.name}'s orbit after staying dark through the early clue trail.`
+      });
+    }
+  }
 
   return culprit;
 }
@@ -1781,12 +1806,15 @@ async function dropCulpritClue(userId) {
     return null;
   }
 
-  const culprit = await Person.findOne({ _id: user.culpritPersonId, userId, status: "alive" });
+  let culprit = await Person.findOne({ _id: user.culpritPersonId, userId, status: "alive" });
   if (!culprit) {
     return null;
   }
 
   const clueStage = user.culpritClueStage || 0;
+  if (culprit.isInWorld === false && clueStage >= 1) {
+    culprit = await surfaceCulpritInWorld(userId, culprit);
+  }
   const clueLines = [
     `Witness chatter points to someone operating around ${culprit.clueProfile?.district}.`,
     `Forensics keep circling a method: ${culprit.clueProfile?.method}.`,
@@ -1800,11 +1828,11 @@ async function dropCulpritClue(userId) {
 
   await createEvent(userId, {
     type: "investigation",
-    headline: "Clue logged into the feed",
+    headline: culprit.isInWorld === false ? "Hidden clue logged into the feed" : "Clue logged into the feed",
     summary,
-    actor: culprit._id,
+    actor: culprit.isInWorld === false ? null : culprit._id,
     faction: culprit.faction,
-    metadata: { culpritClue: true, clueStage }
+    metadata: { culpritClue: true, clueStage, culpritSurfaced: culprit.isInWorld !== false }
   });
 
   return true;
@@ -1822,7 +1850,7 @@ async function guessCulprit(userId, suspectId) {
   if (user.culpritSolved) {
     return {
       correct: true,
-      user: serializeUser(user),
+      user: await buildSerializedUser(user),
       message: "You already identified the culprit."
     };
   }
@@ -1830,12 +1858,12 @@ async function guessCulprit(userId, suspectId) {
   if ((user.culpritGuessCount || 0) >= 3) {
     return {
       correct: false,
-      user: serializeUser(user),
+      user: await buildSerializedUser(user),
       message: "All three guesses have already been used."
     };
   }
 
-  const suspect = await Person.findOne({ _id: suspectId, userId });
+  const suspect = await Person.findOne({ _id: suspectId, userId, status: "alive", isInWorld: { $ne: false } });
   if (!suspect) {
     const error = new Error("Suspect not found");
     error.status = 404;
@@ -1863,7 +1891,7 @@ async function guessCulprit(userId, suspectId) {
 
     return {
       correct: true,
-      user: serializeUser(user),
+      user: await buildSerializedUser(user),
       message: `${suspect.name} is the culprit. Case closed.`
     };
   }
@@ -1889,7 +1917,7 @@ async function guessCulprit(userId, suspectId) {
 
   return {
     correct: false,
-    user: serializeUser(user),
+    user: await buildSerializedUser(user),
     message:
       attemptsRemaining === 0
         ? `${suspect.name} was wrong. The culprit was ${culprit?.name || "unknown"}.`
@@ -1906,8 +1934,8 @@ async function restartCulpritGame(userId) {
     throw error;
   }
 
-  if (!user.culpritSolved) {
-    const error = new Error("Restart is only available after solving the case");
+  if (!user.culpritSolved && (user.culpritGuessCount || 0) < 3) {
+    const error = new Error("Restart is only available after a solved or locked case");
     error.status = 400;
     throw error;
   }
@@ -1931,15 +1959,16 @@ async function restartCulpritGame(userId) {
   await createEvent(userId, {
     type: "investigation",
     headline: "Fresh hunt opened",
-    summary: `${culprit?.name || "A new culprit"} slipped into the city. A new clue trail is now active.`,
-    actor: culprit?._id || null,
+    summary: "The previous file is closed. A new hidden culprit is moving in the city and will surface through the AI feed.",
+    actor: null,
     faction: culprit?.faction || "Independent",
     metadata: { culpritRestarted: true }
   });
 
   const refreshedUser = await User.findById(userId);
   return {
-    user: serializeUser(refreshedUser)
+    user: await buildSerializedUser(refreshedUser),
+    message: "A fresh culprit hunt is now active."
   };
 }
 
@@ -1967,7 +1996,7 @@ function generateToken(user) {
   );
 }
 
-function serializeUser(user) {
+function serializeUser(user, culprit = null) {
   const attemptsRemaining = Math.max(0, 3 - (user.culpritGuessCount || 0));
   const culpritStatus = user.culpritSolved ? "solved" : attemptsRemaining === 0 ? "locked" : "active";
   return {
@@ -1978,13 +2007,19 @@ function serializeUser(user) {
     role: user.role,
     title: user.title || "Field Analyst",
     division: user.division || "Intelligence Unit",
-    culpritGame: {
-      status: culpritStatus,
-      attemptsRemaining,
-      guessesUsed: user.culpritGuessCount || 0,
-      culpritRevealedName: user.culpritRevealedName || null
-    }
-  };
+      culpritGame: {
+        status: culpritStatus,
+        attemptsRemaining,
+        guessesUsed: user.culpritGuessCount || 0,
+        culpritRevealedName: user.culpritRevealedName || null,
+        culpritInWorld: Boolean(culprit && culprit.status === "alive" && culprit.isInWorld !== false)
+      }
+    };
+}
+
+async function buildSerializedUser(user) {
+  const culprit = user?.culpritPersonId ? await Person.findById(user.culpritPersonId).lean() : null;
+  return serializeUser(user, culprit);
 }
 
 async function registerUser({ username, email, password }) {
@@ -2007,7 +2042,7 @@ async function registerUser({ username, email, password }) {
   await ensureCulpritForUser(user._id);
 
   return {
-    user: serializeUser(user),
+    user: await buildSerializedUser(user),
     token
   };
 }
@@ -2035,7 +2070,7 @@ async function loginUser({ email, password }) {
   const token = generateToken(user);
 
   return {
-    user: serializeUser(user),
+    user: await buildSerializedUser(user),
     token
   };
 }
@@ -2048,7 +2083,7 @@ async function getCurrentUser(userId) {
     error.status = 404;
     throw error;
   }
-  return serializeUser(user);
+  return buildSerializedUser(user);
 }
 
 async function updateCurrentUser(userId, payload) {
@@ -2084,7 +2119,7 @@ async function updateCurrentUser(userId, payload) {
   }
 
   await user.save();
-  return serializeUser(user);
+  return buildSerializedUser(user);
 }
 
 function authenticateToken(req, res, next) {
@@ -2278,8 +2313,6 @@ async function createStarterWorld(userId) {
       userId
     }
   ]);
-
-  await ensureCulpritForUser(userId);
 
   return { people, relationships: await Relationship.find({ userId }), crimes: await Crime.find({ userId }) };
 }

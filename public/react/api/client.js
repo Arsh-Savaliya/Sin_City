@@ -34,6 +34,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ suspectId })
     }, token),
+  restartCulpritGame: (token) =>
+    request("/api/dashboard/culprit/restart", {
+      method: "POST"
+    }, token),
   
   updatePersonStatus: (id, status, token) =>
     request(`/api/people/${id}`, {

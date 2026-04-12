@@ -1,4 +1,5 @@
 import { React, html } from "../lib/html.js";
+import { Icons } from "./layout/icons.js";
 
 const { useState } = React;
 
@@ -33,10 +34,6 @@ export function AuthScreen({ onLogin }) {
         throw new Error(data.message || "Authentication failed");
       }
 
-      // Store token
-      localStorage.setItem("bh_token", data.token);
-      localStorage.setItem("bh_user", JSON.stringify(data.user));
-      
       onLogin(data.user, data.token);
     } catch (err) {
       setError(err.message);
@@ -47,6 +44,55 @@ export function AuthScreen({ onLogin }) {
 
   return html`
     <div className="min-h-screen bg-black flex items-center justify-center p-4">
+      <style>
+        ${`
+          @keyframes nocturne-login-runner {
+            0% {
+              transform: translateX(-18%) translateY(0) scale(0.92);
+              opacity: 0;
+            }
+            8% {
+              opacity: 1;
+            }
+            50% {
+              transform: translateX(52%) translateY(-1px) scale(1);
+              opacity: 1;
+            }
+            100% {
+              transform: translateX(118%) translateY(0) scale(0.96);
+              opacity: 0;
+            }
+          }
+
+          @keyframes nocturne-login-trail {
+            0% {
+              opacity: 0;
+              transform: scaleX(0.35);
+            }
+            20% {
+              opacity: 0.9;
+            }
+            100% {
+              opacity: 0.08;
+              transform: scaleX(1.25);
+            }
+          }
+
+          @keyframes nocturne-login-scan {
+            0% {
+              opacity: 0.18;
+              transform: translateX(-6%);
+            }
+            50% {
+              opacity: 0.35;
+            }
+            100% {
+              opacity: 0.18;
+              transform: translateX(6%);
+            }
+          }
+        `}
+      </style>
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <h1 className="font-display text-5xl uppercase tracking-[0.18em] text-blood">NOCTURNE</h1>
@@ -111,12 +157,41 @@ export function AuthScreen({ onLogin }) {
             >
               ${loading ? "Processing..." : isLogin ? "Enter" : "Register"}
             </button>
+
+            ${loading && html`
+              <div className="relative mt-4 overflow-hidden rounded-2xl border border-blood/20 bg-[radial-gradient(circle_at_20%_50%,rgba(196,30,58,0.18),transparent_38%),linear-gradient(90deg,rgba(255,255,255,0.02),rgba(196,30,58,0.06),rgba(255,255,255,0.02))] px-4 py-4">
+                <div
+                  className="pointer-events-none absolute inset-x-4 top-1/2 h-px -translate-y-1/2 bg-gradient-to-r from-transparent via-blood/25 to-transparent"
+                  style=${{ animation: "nocturne-login-scan 1.4s ease-in-out infinite alternate" }}
+                ></div>
+                <div className="relative h-14">
+                  <div
+                    className="absolute left-0 top-1/2 flex w-28 -translate-y-1/2 items-center"
+                    style=${{ animation: "nocturne-login-runner 1.05s linear infinite" }}
+                  >
+                    <div
+                      className="absolute right-6 h-3 w-20 origin-right rounded-full bg-gradient-to-r from-transparent via-blood/55 to-blood/12 blur-[5px]"
+                      style=${{ animation: "nocturne-login-trail 1.05s linear infinite" }}
+                    ></div>
+                    <div className="absolute right-5 h-2 w-12 rounded-full bg-blood/35 blur-sm"></div>
+                    <div className="ml-auto flex h-10 w-10 items-center justify-center rounded-full border border-blood/20 bg-black/45 text-blood shadow-[0_0_22px_rgba(196,30,58,0.4)]">
+                      <${Icons.triangle} className="h-5 w-5" />
+                    </div>
+                  </div>
+                </div>
+                <div className="relative mt-2 flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.24em] text-white/45">
+                  <span>Establishing link</span>
+                  <span>Secure handoff</span>
+                </div>
+              </div>
+            `}
           </form>
 
           <div className="mt-6 text-center">
             <button
               type="button"
               onClick=${() => { setIsLogin(!isLogin); setError(""); }}
+              disabled=${loading}
               className="text-white/50 text-sm hover:text-blood transition"
             >
               ${isLogin ? "New operator? Register here" : "Already registered? Login here"}

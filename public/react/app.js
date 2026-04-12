@@ -23,19 +23,6 @@ function normalizeUserProfile(user) {
   };
 }
 
-function getStoredUser() {
-  const saved = localStorage.getItem("bh_user");
-  if (!saved) {
-    return null;
-  }
-
-  try {
-    return normalizeUserProfile(JSON.parse(saved));
-  } catch (_error) {
-    return null;
-  }
-}
-
 function statForNode(node) {
   if (!node) {
     return [];
@@ -63,8 +50,8 @@ function statForNode(node) {
 }
 
 export function App() {
-  const [user, setUser] = useState(() => getStoredUser());
-  const [token, setToken] = useState(() => localStorage.getItem("bh_token"));
+  const [user, setUser] = useState(null);
+  const [token, setToken] = useState(null);
   const [currentPage, setCurrentPage] = useState("networks");
   const [selectedNode, setSelectedNode] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem("bh_sidebar_open") !== "false");
@@ -72,10 +59,9 @@ export function App() {
   const { dashboard, analytics, simulation, loading, error, actions } = useDashboardData(token);
 
   useEffect(() => {
-    if (user) {
-      localStorage.setItem("bh_user", JSON.stringify(user));
-    }
-  }, [user]);
+    localStorage.removeItem("bh_token");
+    localStorage.removeItem("bh_user");
+  }, []);
 
   useEffect(() => {
     localStorage.setItem("bh_sidebar_open", sidebarOpen ? "true" : "false");
@@ -155,6 +141,13 @@ export function App() {
     return result;
   }
 
+  async function handleRestartCulpritGame() {
+    const result = await api.restartCulpritGame(token);
+    setUser(normalizeUserProfile({ ...user, ...result.user }));
+    await actions.refresh();
+    return result;
+  }
+
   return html`
     <div className="min-h-screen bg-black text-white flex">
       <${Sidebar}
@@ -214,6 +207,7 @@ export function App() {
             onSave=${handleProfileSave}
             dashboard=${dashboard}
             onGuessCulprit=${handleCulpritGuess}
+            onRestartCulpritGame=${handleRestartCulpritGame}
           />
         `}
       </main>
@@ -485,7 +479,7 @@ function MessagesPage({ messages }) {
   `;
 }
 
-function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashboard, onGuessCulprit }) {
+function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashboard, onGuessCulprit, onRestartCulpritGame }) {
   const [formState, setFormState] = useState(() => ({
     operatorName: userProfile?.operatorName || userProfile?.username || "",
     email: userProfile?.email || "",
@@ -499,7 +493,10 @@ function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashbo
   const [guessMessage, setGuessMessage] = useState("");
   const [guessError, setGuessError] = useState("");
   const [isGuessing, setIsGuessing] = useState(false);
-  const suspects = (dashboard?.people || []).filter((person) => person.role === "criminal");
+  const [isRestarting, setIsRestarting] = useState(false);
+  const suspects = (dashboard?.people || []).filter((person) => person.role === "criminal" && person.status === "alive");
+  const canGuess = userProfile?.culpritGame?.status === "active" && Boolean(userProfile?.culpritGame?.culpritInWorld);
+  const canRestart = userProfile?.culpritGame?.status === "solved" || userProfile?.culpritGame?.status === "locked";
 
   useEffect(() => {
     setFormState({
@@ -509,6 +506,12 @@ function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashbo
       division: userProfile?.division || "Intelligence Unit"
     });
   }, [userProfile]);
+
+  useEffect(() => {
+    if (suspectId && !suspects.some((person) => person._id === suspectId)) {
+      setSuspectId("");
+    }
+  }, [suspectId, suspects]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -547,6 +550,22 @@ function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashbo
       setGuessError(guessRequestError.message || "Guess failed.");
     } finally {
       setIsGuessing(false);
+    }
+  }
+
+  async function handleRestartGame() {
+    setIsRestarting(true);
+    setGuessError("");
+    setGuessMessage("");
+
+    try {
+      const result = await onRestartCulpritGame();
+      setSuspectId("");
+      setGuessMessage(result.message || "A fresh culprit hunt is now active.");
+    } catch (restartError) {
+      setGuessError(restartError.message || "Unable to restart the culprit hunt.");
+    } finally {
+      setIsRestarting(false);
     }
   }
 
@@ -671,38 +690,67 @@ function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashbo
               </span>
             </div>
 
-            <p className="mt-3 text-sm text-white/60">
-              Watch the clue cards in the AI feed, compare them with the network, and name the culprit before your three guesses run out.
-            </p>
+              <p className="mt-3 text-sm text-white/60">
+                Watch the clue cards in the AI feed, compare them with the network, and name the culprit before your three guesses run out.
+              </p>
 
-            <form onSubmit=${handleGuessSubmit} className="mt-4 space-y-4">
-              <label className="block">
-                <span className="block text-xs uppercase tracking-widest text-white/50 mb-2">Suspect</span>
-                <select
-                  value=${suspectId}
-                  onChange=${(event) => setSuspectId(event.target.value)}
-                  disabled=${isGuessing || userProfile?.culpritGame?.status !== "active"}
-                  className="w-full rounded border border-white/10 bg-black/30 px-4 py-3 text-white outline-none transition focus:border-blood/50 disabled:opacity-60"
-                >
-                  <option value="">Select criminal suspect</option>
-                  ${suspects.map((person) => html`<option key=${person._id} value=${person._id}>${person.name}</option>`)}
-                </select>
-              </label>
+              <form onSubmit=${handleGuessSubmit} className="mt-4 space-y-4">
+                <div>
+                  <span className="block text-xs uppercase tracking-widest text-white/50 mb-2">Suspect Board</span>
+                  <div className="max-h-64 space-y-2 overflow-y-auto rounded-2xl border border-white/10 bg-black/35 p-2">
+                    ${suspects.length === 0
+                      ? html`<p className="px-3 py-4 text-sm text-white/45">No visible criminal suspects are in the world yet.</p>`
+                      : suspects.map((person) => html`
+                          <button
+                            key=${person._id}
+                            type="button"
+                            onClick=${() => setSuspectId(person._id)}
+                            disabled=${!canGuess || isGuessing}
+                            className=${`w-full rounded-xl border px-3 py-3 text-left transition ${
+                              suspectId === person._id
+                                ? "border-blood bg-blood/12 text-white"
+                                : "border-white/10 bg-black/40 text-white/82 hover:border-white/20 hover:bg-white/5"
+                            } disabled:cursor-not-allowed disabled:opacity-55`}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="font-semibold">${person.name}</span>
+                              <span className="text-[10px] uppercase tracking-[0.22em] text-white/40">${person.powerLevel || 0} power</span>
+                            </div>
+                            <p className="mt-1 text-xs uppercase tracking-[0.18em] text-white/45">
+                              ${person.rank || "Operator"} · ${person.faction || "Independent"}
+                            </p>
+                          </button>
+                        `)}
+                  </div>
+                </div>
 
-              <button
-                type="submit"
-                disabled=${isGuessing || userProfile?.culpritGame?.status !== "active"}
-                className="rounded-full bg-blood px-5 py-3 text-sm uppercase tracking-[0.22em] text-white transition hover:bg-blood/85 disabled:opacity-60"
-              >
-                ${isGuessing ? "Checking" : "Guess Culprit"}
-              </button>
-            </form>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="submit"
+                    disabled=${isGuessing || !canGuess || !suspectId}
+                    className="rounded-full bg-blood px-5 py-3 text-sm uppercase tracking-[0.22em] text-white transition hover:bg-blood/85 disabled:opacity-60"
+                  >
+                    ${isGuessing ? "Checking" : "Guess Culprit"}
+                  </button>
 
-            ${guessError && html`<p className="mt-4 rounded border border-blood/30 bg-blood/10 px-4 py-3 text-sm text-blood">${guessError}</p>`}
-            ${guessMessage && html`<p className="mt-4 rounded border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/80">${guessMessage}</p>`}
-            ${userProfile?.culpritGame?.status !== "active" &&
-            html`
-              <p className="mt-4 text-sm text-white/70">
+                  ${canRestart && html`
+                    <button
+                      type="button"
+                      onClick=${handleRestartGame}
+                      disabled=${isRestarting}
+                      className="rounded-full border border-white/15 bg-white/5 px-5 py-3 text-sm uppercase tracking-[0.22em] text-white transition hover:border-blood/35 hover:bg-blood/10 disabled:opacity-60"
+                    >
+                      ${isRestarting ? "Restarting" : "Restart Hunt"}
+                    </button>
+                  `}
+                </div>
+              </form>
+
+              ${guessError && html`<p className="mt-4 rounded border border-blood/30 bg-blood/10 px-4 py-3 text-sm text-blood">${guessError}</p>`}
+              ${guessMessage && html`<p className="mt-4 rounded border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/80">${guessMessage}</p>`}
+              ${userProfile?.culpritGame?.status !== "active" &&
+              html`
+                <p className="mt-4 text-sm text-white/70">
                 ${userProfile?.culpritGame?.status === "solved"
                   ? `Case solved. Culprit: ${userProfile?.culpritGame?.culpritRevealedName}.`
                   : `Case locked. Culprit: ${userProfile?.culpritGame?.culpritRevealedName || "unknown"}.`}

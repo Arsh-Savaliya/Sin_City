@@ -28,14 +28,15 @@ const personSchema = new mongoose.Schema(
     fearFactor: { type: Number, default: 50, min: 0, max: 100 },
     intelligenceLevel: { type: Number, default: 50, min: 0, max: 100 },
     dominanceScore: { type: Number, default: 0, min: 0 },
-    status: {
-      type: String,
-      enum: ["alive", "dead"],
-      default: "alive"
-    },
-    isCorrupt: { type: Boolean, default: false },
-    isBoss: { type: Boolean, default: false },
-    isOutsider: { type: Boolean, default: false },
+      status: {
+        type: String,
+        enum: ["alive", "dead"],
+        default: "alive"
+      },
+      isInWorld: { type: Boolean, default: true },
+      isCorrupt: { type: Boolean, default: false },
+      isBoss: { type: Boolean, default: false },
+      isOutsider: { type: Boolean, default: false },
     isCulprit: { type: Boolean, default: false },
     clueProfile: {
       district: { type: String, trim: true },
