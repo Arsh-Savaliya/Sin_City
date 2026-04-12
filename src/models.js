@@ -17,6 +17,8 @@ const personSchema = new mongoose.Schema(
     money: { type: Number, default: 0 },
     cases: { type: Number, default: 0 },
     crimesCommitted: [{ type: String, trim: true }],
+    murders: { type: Number, default: 0 },
+    encounters: { type: Number, default: 0 },
     influenceScore: { type: Number, default: 0 },
     integrityScore: { type: Number, default: 0 },
     casesSolved: { type: Number, default: 0 },
@@ -34,6 +36,13 @@ const personSchema = new mongoose.Schema(
     isCorrupt: { type: Boolean, default: false },
     isBoss: { type: Boolean, default: false },
     isOutsider: { type: Boolean, default: false },
+    isCulprit: { type: Boolean, default: false },
+    clueProfile: {
+      district: { type: String, trim: true },
+      method: { type: String, trim: true },
+      tell: { type: String, trim: true },
+      trait: { type: String, trim: true }
+    },
     backgroundTier: {
       type: String,
       enum: ["weak", "balanced", "powerful"]
@@ -161,6 +170,9 @@ const eventSchema = new mongoose.Schema(
         "promotion",
         "elimination",
         "emergence",
+        "crime",
+        "investigation",
+        "recalibration",
         "simulation"
       ],
       required: true
@@ -183,13 +195,28 @@ const Event = mongoose.model("Event", eventSchema);
 
 const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true, trim: true, minlength: 3 },
+  operatorName: { type: String, trim: true },
   email: { type: String, required: true, unique: true, trim: true },
   password: { type: String, required: true, minlength: 6 },
   role: { type: String, enum: ["operator", "admin"], default: "operator" },
+  title: { type: String, trim: true, default: "Field Analyst" },
+  division: { type: String, trim: true, default: "Intelligence Unit" },
+  culpritPersonId: { type: mongoose.Schema.Types.ObjectId, ref: "Person" },
+  culpritClueStage: { type: Number, default: 0 },
+  culpritGuessCount: { type: Number, default: 0 },
+  culpritSolved: { type: Boolean, default: false },
+  culpritRevealedName: { type: String, trim: true },
   isActive: { type: Boolean, default: true },
   lastLogin: { type: Date },
   createdAt: { type: Date, default: Date.now }
 }, { timestamps: true });
+
+userSchema.pre("validate", function syncOperatorName(next) {
+  if (!this.operatorName && this.username) {
+    this.operatorName = this.username;
+  }
+  next();
+});
 
 userSchema.pre("save", function hashPassword(next) {
   if (!this.isModified("password")) return next();

@@ -49,7 +49,7 @@ export function AuthScreen({ onLogin }) {
     <div className="min-h-screen bg-black flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="font-display text-5xl uppercase tracking-widest text-blood">Black Horizon</h1>
+          <h1 className="font-display text-5xl uppercase tracking-[0.18em] text-blood">NOCTURNE</h1>
           <p className="text-white/50 mt-2 uppercase tracking-widest text-sm">Intelligence Unit</p>
         </div>
 

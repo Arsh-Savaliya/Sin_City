@@ -1,9 +1,7 @@
 export const viewOptions = [
   { key: "criminal", label: "Network" },
   { key: "corruption", label: "Corruption" },
-  { key: "power", label: "Power" },
-  { key: "police", label: "Police" },
-  { key: "hierarchy", label: "Hierarchy" }
+  { key: "police", label: "Police" }
 ];
 
 export function getGraphForView(dashboard, view) {
@@ -14,7 +12,6 @@ export function getGraphForView(dashboard, view) {
   const viewMap = {
     criminal: dashboard.views?.criminalNetwork,
     corruption: dashboard.views?.corruptionNetwork,
-    power: dashboard.views?.powerNetwork,
     police: dashboard.views?.policeNetwork
   };
 
@@ -77,19 +74,19 @@ export function buildMessages(analytics, events, mockMessages) {
   const messages = [...(mockMessages || [])];
 
   if (events && events.length > 0) {
-    events.slice(0, 3).forEach((event) => {
+    events.forEach((event) => {
       let priority = "low";
-      if (event.type === "assassination" || event.type === "takeover") {
+      if (["assassination", "takeover", "elimination"].includes(event.type)) {
         priority = "high";
-      } else if (event.type === "betrayal" || event.type === "alliance") {
+      } else if (["betrayal", "alliance", "crime", "investigation", "recalibration", "raid"].includes(event.type)) {
         priority = "medium";
       }
 
       messages.push({
         id: event._id || `evt-${Date.now()}`,
-        sender: "Event Engine",
+        sender: event.metadata?.culpritClue ? "Clue Desk" : "Event Engine",
         subject: event.headline || "Unknown Event",
-        body: event.summary || "",
+        body: event.metadata?.culpritClue ? `Clue: ${event.summary || ""}` : event.summary || "",
         priority,
         timestamp: event.happenedAt || new Date().toISOString()
       });

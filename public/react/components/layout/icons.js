@@ -18,6 +18,17 @@ function icon(paths) {
 }
 
 export const Icons = {
+  triangle: ({ className = "h-5 w-5", direction = "right" } = {}) => {
+    const points =
+      direction === "left"
+        ? "18 3, 6 12, 14 21"
+        : "6 3, 18 10, 10 21";
+    return html`
+      <svg viewBox="0 0 24 24" className=${className} aria-hidden="true">
+        <polygon points=${points} fill="currentColor"></polygon>
+      </svg>
+    `;
+  },
   network: () =>
     icon(html`
       <circle cx="6" cy="6" r="2"></circle>
@@ -69,14 +80,8 @@ export const Icons = {
       <path d="M4 12h16"></path>
       <path d="M4 17h16"></path>
     `),
-  collapse: () =>
-    icon(html`
-      <path d="M15 6l-6 6 6 6"></path>
-    `),
-  expand: () =>
-    icon(html`
-      <path d="M9 6l6 6-6 6"></path>
-    `),
+  collapse: () => html`<${Icons.triangle} direction="left" />`,
+  expand: () => html`<${Icons.triangle} direction="right" />`,
   pulse: () =>
     icon(html`
       <path d="M3 12h4l2-5 4 10 2-5h6"></path>

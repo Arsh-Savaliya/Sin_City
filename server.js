@@ -12,6 +12,8 @@ const {
   asyncHandler,
   registerUser,
   loginUser,
+  getCurrentUser,
+  updateCurrentUser,
   authenticateToken,
   listPeople, createPerson, updatePerson, deletePerson,
   listCrimes, createCrime, updateCrime,
@@ -21,6 +23,7 @@ const {
   createEvent,
   listEvents,
   runSimulationTick,
+  guessCulprit,
   startSimulation,
   setSimulationRunning,
   getSimulationState,
@@ -59,6 +62,12 @@ authRouter.post("/register", asyncHandler(async (req, res) => {
 authRouter.post("/login", asyncHandler(async (req, res) => {
   const result = await loginUser(req.body);
   res.json(result);
+}));
+authRouter.get("/me", authenticateToken, asyncHandler(async (req, res) => {
+  res.json(await getCurrentUser(userIdFromRequest(req)));
+}));
+authRouter.patch("/me", authenticateToken, asyncHandler(async (req, res) => {
+  res.json(await updateCurrentUser(userIdFromRequest(req), req.body));
 }));
 
 app.use("/api/auth", authRouter);
@@ -141,7 +150,7 @@ dashboardRouter.get("/events", asyncHandler(async (req, res) => {
   res.json(events);
 }));
 dashboardRouter.get("/simulation", asyncHandler(async (_req, res) => {
-  res.json(await getSimulationState());
+  res.json(await getSimulationState(userIdFromRequest(_req)));
 }));
 dashboardRouter.post("/simulation/toggle", asyncHandler(async (req, res) => {
   const state = setSimulationRunning(req.body.isRunning);
@@ -149,8 +158,13 @@ dashboardRouter.post("/simulation/toggle", asyncHandler(async (req, res) => {
   res.json(await getSimulationState());
 }));
 dashboardRouter.post("/simulation/tick", asyncHandler(async (req, res) => {
-  const result = await runSimulationTick(req.body.reason || "manual");
+  const result = await runSimulationTick(userIdFromRequest(req), req.body.reason || "manual");
   await emitGraphRefresh(req.app.get("io"), "simulation-tick");
+  res.json(result);
+}));
+dashboardRouter.post("/culprit/guess", asyncHandler(async (req, res) => {
+  const result = await guessCulprit(userIdFromRequest(req), req.body.suspectId);
+  await emitGraphRefresh(req.app.get("io"), "culprit-guess");
   res.json(result);
 }));
 
@@ -227,7 +241,9 @@ function registerSocketHandlers(socketIo) {
       socketIo.emit("simulation:state", state);
     });
     socket.on("simulation:tick", async (reason) => {
-      const result = await runSimulationTick(reason || "socket");
+      const { User } = require("./src/models");
+      const users = await User.find({}, "_id").lean();
+      const result = await Promise.all(users.map((user) => runSimulationTick(user._id, reason || "socket")));
       socketIo.emit("graph:refresh", { reason: "socket-tick", result, timestamp: new Date() });
     });
   });
@@ -239,7 +255,9 @@ async function bootstrap() {
 
   registerSocketHandlers(io);
   startSimulation(async () => {
-    await runSimulationTick("auto");
+    const { User } = require("./src/models");
+    const users = await User.find({}, "_id").lean();
+    await Promise.all(users.map((user) => runSimulationTick(user._id, "auto")));
     await emitGraphRefresh(io, "simulation-auto");
   });
 

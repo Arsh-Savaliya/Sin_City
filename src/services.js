@@ -1,8 +1,6 @@
 const mongoose = require("mongoose");
 const { Person, Crime, Relationship, Event } = require("./models");
 
-const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta";
-
 function connectDB(uri) {
   if (!uri) {
     throw new Error("MONGODB_URI is required");
@@ -39,8 +37,11 @@ function successorScore(person) {
   );
 }
 
-async function refreshDominanceScores(personIds = null) {
+async function refreshDominanceScores(personIds = null, userId = null) {
   const query = personIds?.length ? { _id: { $in: personIds } } : {};
+  if (userId) {
+    query.userId = userId;
+  }
   const people = await Person.find(query);
   await Promise.all(
     people.map((person) => {
@@ -164,30 +165,38 @@ async function deleteRelationship(userId, id) {
 }
 
 async function getDashboardGraph(userId) {
-  const [people, relationships, crimes, events] = await Promise.all([
+  const [peopleRaw, relationships, crimesRaw, eventsRaw] = await Promise.all([
     Person.find({ userId }).lean(),
     Relationship.find({ userId }).populate("source target").lean(),
     Crime.find({ userId }).populate("committedBy solvedBy").sort({ occurredAt: -1 }).lean(),
     Event.find({ userId }).populate("actor target").sort({ happenedAt: -1 }).limit(30).lean()
   ]);
 
+  const sanitizedRelationships = (relationships || []).map((relationship) => ({
+    ...relationship,
+    source: sanitizePersonForClient(relationship.source),
+    target: sanitizePersonForClient(relationship.target)
+  }));
+  const crimes = (crimesRaw || []).map((crime) => ({
+    ...crime,
+    committedBy: (crime.committedBy || []).map((person) => sanitizePersonForClient(person)),
+    solvedBy: sanitizePersonForClient(crime.solvedBy)
+  }));
+  const events = (eventsRaw || []).map((event) => ({
+    ...event,
+    actor: sanitizePersonForClient(event.actor),
+    target: sanitizePersonForClient(event.target)
+  }));
+  const people = sanitizePeopleForClient(enrichPeopleForDashboard(peopleRaw, crimesRaw, eventsRaw, relationships));
   const criminals = people.filter((person) => person.role === "criminal");
   const police = people.filter((person) => person.role === "police");
 
-  const hierarchyLinks = relationships.filter((link) => link.type === "command");
-  const policeLinks = relationships.filter(
+  const policeLinks = sanitizedRelationships.filter(
     (link) =>
       link.type === "official" &&
       link.source?.role === "police" &&
       link.target?.role === "police"
   );
-  const corruptionLinks = relationships.filter(
-    (link) =>
-      link.type === "corruption" ||
-      (link.source?.role === "criminal" && link.target?.isCorrupt) ||
-      (link.target?.role === "criminal" && link.source?.isCorrupt)
-  );
-
   return {
     people,
     crimes,
@@ -195,74 +204,116 @@ async function getDashboardGraph(userId) {
     views: {
       criminalNetwork: {
         nodes: criminals,
-        links: relationships.filter(
+        links: sanitizedRelationships.filter(
           (link) =>
             link.source?.role === "criminal" &&
             link.target?.role === "criminal"
         )
       },
-      hierarchy: buildHierarchy(criminals, hierarchyLinks),
       policeNetwork: {
         nodes: police,
         links: policeLinks
       },
       corruptionNetwork: {
         nodes: people.filter((person) => person.role === "criminal" || person.isCorrupt),
-        links: relationships.filter(
+        links: sanitizedRelationships.filter(
           (link) =>
             ["alliance", "rivalry", "transaction", "official", "corruption"].includes(link.type) &&
             [link.source?._id?.toString(), link.target?._id?.toString()].every(Boolean)
-        )
-      },
-      powerNetwork: {
-        nodes: people.filter((person) => person.role === "criminal"),
-        links: relationships.filter(
-          (link) =>
-            ["alliance", "rivalry", "command", "transaction"].includes(link.type) &&
-            link.source?.role === "criminal" &&
-            link.target?.role === "criminal"
         )
       }
     }
   };
 }
 
-function buildHierarchy(nodes, links) {
-  const lookup = new Map(
-    nodes.map((node) => [
-      node._id.toString(),
-      {
-        ...node,
-        children: []
+function enrichPeopleForDashboard(people, crimes, events, relationships) {
+  const crimeCounts = new Map();
+  const murderCounts = new Map();
+  const encounterCounts = new Map();
+  const corruptionExposure = new Map();
+
+  crimes.forEach((crime) => {
+    (crime.committedBy || []).forEach((entry) => {
+      const id = (entry?._id || entry)?.toString();
+      if (!id) {
+        return;
       }
-    ])
-  );
+      crimeCounts.set(id, (crimeCounts.get(id) || 0) + 1);
+    });
+  });
 
-  const childIds = new Set();
-
-  for (const link of links) {
-    const sourceId = link.source?._id?.toString();
-    const targetId = link.target?._id?.toString();
-    const parent = lookup.get(sourceId);
-    const child = lookup.get(targetId);
-
-    if (parent && child) {
-      parent.children.push(child);
-      childIds.add(targetId);
+  events.forEach((event) => {
+    const actorId = event.actor?._id?.toString() || event.actor?.toString();
+    if (!actorId) {
+      return;
     }
+
+    if (["assassination", "elimination"].includes(event.type)) {
+      murderCounts.set(actorId, (murderCounts.get(actorId) || 0) + 1);
+    }
+
+    if (["raid", "investigation", "elimination", "assassination"].includes(event.type)) {
+      encounterCounts.set(actorId, (encounterCounts.get(actorId) || 0) + 1);
+    }
+  });
+
+  relationships.forEach((relationship) => {
+    if (relationship.type !== "corruption") {
+      return;
+    }
+    const sourceId = relationship.source?._id?.toString() || relationship.source?.toString();
+    const targetId = relationship.target?._id?.toString() || relationship.target?.toString();
+    [sourceId, targetId].forEach((id) => {
+      if (id) {
+        corruptionExposure.set(id, (corruptionExposure.get(id) || 0) + (relationship.weight || 1));
+      }
+    });
+  });
+
+  return people.map((person) => {
+    const personId = person._id.toString();
+    const totalCrimes = crimeCounts.get(personId) || 0;
+    const murders = person.murders || murderCounts.get(personId) || 0;
+    const encounters = person.encounters || encounterCounts.get(personId) || 0;
+    const underworldPower = person.isCorrupt
+      ? Math.round(
+          (person.powerLevel || 0) * 0.25 +
+          (person.influenceScore || 0) * 2 +
+          (corruptionExposure.get(personId) || 0) * 14
+        )
+      : 0;
+
+    return {
+      ...person,
+      totalCrimes,
+      murders,
+      encounters,
+      underworldPower
+    };
+  });
+}
+
+function sanitizePersonForClient(person) {
+  if (!person) {
+    return person;
   }
 
-  const roots = Array.from(lookup.values()).filter((node) => !childIds.has(node._id.toString()));
-  return roots.length === 1 ? roots[0] : { name: "Syndicate", children: roots };
+  const { isCulprit, clueProfile, ...safePerson } = person;
+  return safePerson;
+}
+
+function sanitizePeopleForClient(people) {
+  return (people || []).map((person) => sanitizePersonForClient(person));
 }
 
 async function runRelationshipAnalysis(userId) {
-  const [people, relationships, crimes, events] = await Promise.all([
+  const [peopleRaw, relationships, crimes, events] = await Promise.all([
     Person.find({ userId }).lean(),
     Relationship.find({ userId }).lean(),
     Crime.find({ userId }).lean(),
     Event.find({ userId }).sort({ happenedAt: -1 }).limit(40).lean()
   ]);
+  const people = enrichPeopleForDashboard(peopleRaw, crimes, events, relationships);
 
   const relationMap = new Map();
   for (const relation of relationships) {
@@ -423,9 +474,9 @@ async function runRelationshipAnalysis(userId) {
         ? crimes.filter((crime) => crime.status === "solved").length / crimes.length
         : 0
     },
-    mostInfluential,
-    nextDominantPlayer,
-    likelyBetrayal,
+    mostInfluential: sanitizePersonForClient(mostInfluential),
+    nextDominantPlayer: sanitizePersonForClient(nextDominantPlayer),
+    likelyBetrayal: sanitizePersonForClient(likelyBetrayal),
     suspiciousPolice,
     hiddenRelationships,
     crimePressure,
@@ -437,7 +488,7 @@ async function runRelationshipAnalysis(userId) {
 
 const simulationState = {
   isRunning: true,
-  intervalMs: 18000,
+  intervalMs: 40000,
   timer: null,
   lastTickAt: null,
   populationPressureThreshold: 3
@@ -480,6 +531,18 @@ const backgroundProfiles = {
     cases: [0, 3]
   }
 };
+
+const cityDistricts = ["Harbor District", "North Spine", "Old Quarter", "Red Market", "Ash Avenue", "Port Meridian"];
+const culpritMethods = ["silenced pistol", "burner-ledger trail", "dockside knife work", "ghost-transfer fraud", "witness coercion"];
+const culpritTells = ["smells of clove smoke", "always leaves a black token", "uses left-handed strikes", "bribes through charity fronts", "travels with a harbor pass"];
+const culpritTraits = ["cold patience", "reckless ambition", "ritual precision", "quiet vanity", "street-level charm"];
+const proceduralCrimeCatalog = [
+  { category: "Smuggling", title: "Dockside Ghost Run", summary: "Unmarked cargo slipped through a protected corridor.", violent: false },
+  { category: "Racketeering", title: "Protection Sweep", summary: "Shopkeepers folded after a coordinated intimidation push.", violent: false },
+  { category: "Homicide", title: "Back-Alley Execution", summary: "A targeted killing sent a warning through the district.", violent: true },
+  { category: "Cyber Fraud", title: "Ledger Breach", summary: "Shell accounts were hit through a precision laundering route.", violent: false },
+  { category: "Arms Trade", title: "Black Market Reload", summary: "A fresh gun line appeared under cover of city noise.", violent: true }
+];
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -579,134 +642,6 @@ async function uniqueGeneratedName() {
   return `Ghost ${Date.now().toString().slice(-4)}`;
 }
 
-function isGeminiConfigured() {
-  return Boolean(process.env.GEMINI_API_KEY);
-}
-
-function geminiModel() {
-  return process.env.GEMINI_MODEL || "gemini-2.5-flash";
-}
-
-async function requestGeminiJson(prompt, schema) {
-  if (!isGeminiConfigured()) {
-    return null;
-  }
-
-  const response = await fetch(
-    `${GEMINI_API_BASE}/models/${geminiModel()}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": process.env.GEMINI_API_KEY
-      },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.35,
-          topP: 0.95,
-          maxOutputTokens: 500,
-          responseMimeType: "application/json",
-          ...(schema ? { responseJsonSchema: schema } : {})
-        }
-      })
-    }
-  );
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`Gemini request failed: ${response.status} ${body}`);
-  }
-
-  const data = await response.json();
-  const text =
-    data?.candidates?.[0]?.content?.parts
-      ?.map((part) => part.text || "")
-      .join("")
-      .trim() || "";
-
-  if (!text) {
-    return null;
-  }
-
-  return parseLooseJson(text);
-}
-
-function parseLooseJson(text) {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const raw = (fenced ? fenced[1] : text).replace(/^\uFEFF/, "").trim();
-  const candidates = collectJsonCandidates(raw);
-  let lastError = null;
-
-  for (const candidate of candidates) {
-    try {
-      return JSON.parse(candidate);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw new Error(`Unable to parse Gemini JSON: ${lastError?.message || "unknown parse failure"}`);
-}
-
-function collectJsonCandidates(raw) {
-  const candidates = [];
-  const pushCandidate = (value) => {
-    const candidate = value?.trim();
-    if (!candidate || candidates.includes(candidate)) {
-      return;
-    }
-    candidates.push(candidate);
-  };
-
-  pushCandidate(raw);
-  pushCandidate(sanitizeJsonCandidate(raw));
-
-  const firstBrace = raw.indexOf("{");
-  const lastBrace = raw.lastIndexOf("}");
-  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-    const extracted = raw.slice(firstBrace, lastBrace + 1);
-    pushCandidate(extracted);
-    pushCandidate(sanitizeJsonCandidate(extracted));
-  }
-
-  return candidates;
-}
-
-function sanitizeJsonCandidate(value) {
-  return escapeBareNewlinesInStrings(
-    value
-      .replace(/[\u201C\u201D]/g, '"')
-      .replace(/[\u2018\u2019]/g, "'")
-      .replace(/,\s*([}\]])/g, "$1")
-  );
-}
-
-function escapeBareNewlinesInStrings(value) {
-  let escaped = "";
-  let inString = false;
-  let isEscaping = false;
-
-  for (const character of value) {
-    if (character === '"' && !isEscaping) {
-      inString = !inString;
-      escaped += character;
-      continue;
-    }
-
-    if (inString && (character === "\n" || character === "\r")) {
-      escaped += character === "\n" ? "\\n" : "\\r";
-      isEscaping = false;
-      continue;
-    }
-
-    escaped += character;
-    isEscaping = character === "\\" && !isEscaping;
-  }
-
-  return escaped;
-}
-
 function clampSummary(text, maxLength = 420) {
   if (!text) {
     return text;
@@ -715,123 +650,20 @@ function clampSummary(text, maxLength = 420) {
 }
 
 async function generateCharacterLore({ person, fallbackLore, anchorName, worldState }) {
-  if (!isGeminiConfigured()) {
-    return { ...fallbackLore, source: "local" };
-  }
-
-  try {
-    const CHARACTER_LORE_SCHEMA = {
-      type: "object",
-      properties: {
-        backgroundTier: { type: "string", enum: ["weak", "balanced", "powerful"] },
-        backgroundSummary: { type: "string" },
-        backstory: { type: "string" }
-      },
-      required: ["backgroundTier", "backgroundSummary", "backstory"]
-    };
-
-    const prompt = [
-      "You are writing compact noir criminal-world lore for a simulation game.",
-      "Return ONLY valid JSON with keys: backgroundTier, backgroundSummary, backstory.",
-      'backgroundTier must be one of: "weak", "balanced", "powerful".',
-      "backgroundSummary must be one sentence.",
-      "backstory must be 2-4 sentences, grounded, cinematic, and believable.",
-      "Do not use markdown, code fences, or extra keys.",
-      "",
-      `Character name: ${person.name}`,
-      `Alias: ${person.alias || "None"}`,
-      `Role: ${person.role}`,
-      `Faction: ${person.faction || "Independent"}`,
-      `Rank: ${person.rank || "Unknown"}`,
-      `Power level: ${person.powerLevel}`,
-      `Loyalty: ${person.loyaltyScore}`,
-      `Ambition: ${person.ambitionLevel}`,
-      `Fear: ${person.fearFactor}`,
-      `Intelligence: ${person.intelligenceLevel}`,
-      `Outsider: ${person.isOutsider ? "yes" : "no"}`,
-      `Corrupt: ${person.isCorrupt ? "yes" : "no"}`,
-      `Weakness tags: ${(person.weaknessTags || []).join(", ") || "none"}`,
-      `Connected entry point: ${anchorName || "none"}`,
-      `Current city pressure: ${worldState?.pressure || "stable"}`,
-      "",
-      `Fallback background tier: ${fallbackLore.backgroundTier}`,
-      `Fallback summary: ${fallbackLore.backgroundSummary}`,
-      `Fallback backstory: ${fallbackLore.backstory}`
-    ].join("\n");
-
-    const parsed = await requestGeminiJson(prompt, CHARACTER_LORE_SCHEMA);
-    if (!parsed || typeof parsed !== "object") {
-      return { ...fallbackLore, source: "local" };
-    }
-
-    const backgroundTier = ["weak", "balanced", "powerful"].includes(parsed.backgroundTier)
-      ? parsed.backgroundTier
-      : fallbackLore.backgroundTier;
-
-    return {
-      backgroundTier,
-      backgroundSummary: clampSummary(parsed.backgroundSummary || fallbackLore.backgroundSummary, 160),
-      backstory: clampSummary(parsed.backstory || fallbackLore.backstory, 700),
-      source: "gemini"
-    };
-  } catch (error) {
-    console.error("Gemini character lore failed, using fallback", error.message);
-    return { ...fallbackLore, source: "local" };
-  }
+  return {
+    backgroundTier: fallbackLore.backgroundTier,
+    backgroundSummary: clampSummary(fallbackLore.backgroundSummary, 160),
+    backstory: clampSummary(fallbackLore.backstory, 700),
+    source: "local"
+  };
 }
 
 async function generateEventNarrative({ type, headline, summary, actorId, targetId, faction, metadata = {} }) {
-  if (!isGeminiConfigured()) {
-    return { headline, summary, source: "local" };
-  }
-
-  try {
-    const EVENT_NARRATIVE_SCHEMA = {
-      type: "object",
-      properties: {
-        headline: { type: "string" },
-        summary: { type: "string" }
-      },
-      required: ["headline", "summary"]
-    };
-
-    const ids = [actorId, targetId].filter(Boolean);
-    const people = ids.length
-      ? await Person.find({ _id: { $in: ids } }).select("name alias faction rank backgroundTier").lean()
-      : [];
-    const actor = people.find((person) => actorId && person._id.toString() === actorId.toString());
-    const target = people.find((person) => targetId && person._id.toString() === targetId.toString());
-
-    const prompt = [
-      "You are rewriting event narration for a dark crime-world simulation.",
-      "Return ONLY valid JSON with keys: headline, summary.",
-      "headline must stay under 70 characters and feel sharp and cinematic.",
-      "summary must stay under 220 characters and be vivid but concise.",
-      "Do not use markdown or extra keys.",
-      "",
-      `Event type: ${type}`,
-      `Faction: ${faction || "Unknown"}`,
-      `Actor: ${actor?.name || "Unknown"} ${actor?.alias ? `(${actor.alias})` : ""}`,
-      `Target: ${target?.name || "Unknown"} ${target?.alias ? `(${target.alias})` : ""}`,
-      `Base headline: ${headline}`,
-      `Base summary: ${summary}`,
-      `Metadata: ${JSON.stringify(metadata)}`
-    ].join("\n");
-
-    const parsed = await requestGeminiJson(prompt, EVENT_NARRATIVE_SCHEMA);
-    if (!parsed || typeof parsed !== "object") {
-      return { headline, summary, source: "local" };
-    }
-
-    return {
-      headline: clampSummary(parsed.headline || headline, 70),
-      summary: clampSummary(parsed.summary || summary, 220),
-      source: "gemini"
-    };
-  } catch (error) {
-    console.error("Gemini event narration failed, using fallback", error.message);
-    return { headline, summary, source: "local" };
-  }
+  return {
+    headline: clampSummary(headline, 70),
+    summary: clampSummary(summary, 220),
+    source: "local"
+  };
 }
 
 async function createEvent(userIdOrPayload, payload) {
@@ -860,20 +692,24 @@ async function createEvent(userIdOrPayload, payload) {
   });
 }
 
+function withOptionalUserId(userId, query = {}) {
+  return userId ? { ...query, userId } : query;
+}
+
 async function listEvents(userId, limit = 25) {
   return Event.find({ userId }).populate("actor target").sort({ happenedAt: -1 }).limit(limit).lean();
 }
 
-async function getPopulationBalance() {
+async function getPopulationBalance(userId = null) {
   const [generatedCount, killCount, aliveCount, deadCount] = await Promise.all([
-    Event.countDocuments({
+    Event.countDocuments(withOptionalUserId(userId, {
       $or: [{ type: "emergence" }, { "metadata.generated": true }]
-    }),
-    Event.countDocuments({
+    })),
+    Event.countDocuments(withOptionalUserId(userId, {
       $or: [{ type: "assassination" }, { type: "elimination" }]
-    }),
-    Person.countDocuments({ status: "alive" }),
-    Person.countDocuments({ status: "dead" })
+    })),
+    Person.countDocuments(withOptionalUserId(userId, { status: "alive" })),
+    Person.countDocuments(withOptionalUserId(userId, { status: "dead" }))
   ]);
 
   const surplus = generatedCount - killCount;
@@ -885,6 +721,63 @@ async function getPopulationBalance() {
         : "stable";
 
   return { generatedCount, killCount, aliveCount, deadCount, surplus, pressure, threshold: simulationState.populationPressureThreshold };
+}
+
+function buildChangeSummary(before, after, labels) {
+  return Object.entries(labels)
+    .map(([key, label]) => {
+      const delta = (after[key] || 0) - (before[key] || 0);
+      if (!delta) {
+        return null;
+      }
+      const prefix = delta > 0 ? "+" : "";
+      return `${label} ${prefix}${delta}`;
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
+async function recalibrateIndividual(userId, person, deltas, reason) {
+  if (!person) {
+    return null;
+  }
+
+  const before = {
+    powerLevel: person.powerLevel || 0,
+    influenceScore: person.influenceScore || 0,
+    fearFactor: person.fearFactor || 0,
+    loyaltyScore: person.loyaltyScore || 0
+  };
+
+  person.powerLevel = clamp((person.powerLevel || 0) + (deltas.powerLevel || 0), 0, 1000);
+  person.influenceScore = clamp((person.influenceScore || 0) + (deltas.influenceScore || 0), 0, 100);
+  person.fearFactor = clamp((person.fearFactor || 0) + (deltas.fearFactor || 0), 0, 100);
+  person.loyaltyScore = clamp((person.loyaltyScore || 0) + (deltas.loyaltyScore || 0), 0, 100);
+  await person.save();
+
+  const summary = buildChangeSummary(before, person, {
+    powerLevel: "power",
+    influenceScore: "influence",
+    fearFactor: "fear",
+    loyaltyScore: "loyalty"
+  });
+
+  if (summary) {
+    await createEvent(userId, {
+      type: "recalibration",
+      headline: `${person.name} recalibrates`,
+      summary: `${person.name} adjusted after ${reason}: ${summary}.`,
+      actor: person._id,
+      faction: person.faction,
+      metadata: { reason, deltas }
+    });
+  }
+
+  return person;
+}
+
+function nextCrimeId() {
+  return `SC-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
 }
 
 function killResistanceScore(person) {
@@ -910,8 +803,9 @@ function vulnerabilityScore(person) {
   );
 }
 
-async function handleSuccession(deadBoss) {
+async function handleSuccession(deadBoss, userId = null) {
   const candidates = await Person.find({
+    ...(userId && { userId }),
     _id: { $in: deadBoss.heirCandidates || [] },
     status: "alive"
   });
@@ -923,7 +817,7 @@ async function handleSuccession(deadBoss) {
   candidates.sort((a, b) => successorScore(b) - successorScore(a));
   const successor = candidates[0];
 
-  await Person.updateMany({ faction: deadBoss.faction, isBoss: true }, { $set: { isBoss: false } });
+  await Person.updateMany(withOptionalUserId(userId, { faction: deadBoss.faction, isBoss: true }), { $set: { isBoss: false } });
   successor.isBoss = true;
   successor.rank = "Boss";
   successor.powerLevel = clamp(successor.powerLevel + 180, 0, 1000);
@@ -933,6 +827,7 @@ async function handleSuccession(deadBoss) {
   await successor.save();
 
   const defectors = await Person.find({
+    ...(userId && { userId }),
     faction: deadBoss.faction,
     status: "alive",
     _id: { $ne: successor._id },
@@ -946,10 +841,10 @@ async function handleSuccession(deadBoss) {
       person.ambitionLevel = clamp(person.ambitionLevel + 10, 0, 100);
       await person.save();
       await Relationship.updateMany(
-        {
+        withOptionalUserId(userId, {
           $or: [{ source: person._id }, { target: person._id }],
           type: "command"
-        },
+        }),
         {
           $set: { status: "severed" }
         }
@@ -957,7 +852,7 @@ async function handleSuccession(deadBoss) {
     })
   );
 
-  await createEvent({
+  await createEvent(userId, {
     type: "succession",
     headline: `${successor.name} claims the throne`,
     summary: `${successor.name} inherited ${deadBoss.faction} after ${deadBoss.name} fell. ${defectors.length} member(s) defected in the aftermath.`,
@@ -975,7 +870,7 @@ async function handleSuccession(deadBoss) {
   return successor;
 }
 
-async function markPersonDead(person, eventPayload) {
+async function markPersonDead(person, eventPayload, userId = null) {
   if (!person || person.status === "dead") {
     return false;
   }
@@ -987,15 +882,15 @@ async function markPersonDead(person, eventPayload) {
   await person.save();
 
   await Relationship.updateMany(
-    {
+    withOptionalUserId(userId, {
       $or: [{ source: person._id }, { target: person._id }]
-    },
+    }),
     {
       $set: { status: "weakening" }
     }
   );
 
-  await createEvent({
+  await createEvent(userId, {
     type: eventPayload.type || "elimination",
     headline: eventPayload.headline,
     summary: eventPayload.summary,
@@ -1006,21 +901,21 @@ async function markPersonDead(person, eventPayload) {
   });
 
   if (person.isBoss) {
-    await handleSuccession(person);
+    await handleSuccession(person, userId);
   }
 
   return true;
 }
 
-async function assassinationAttempt() {
-  const rivalries = await Relationship.find({
+async function assassinationAttempt(userId = null) {
+  const rivalries = await Relationship.find(withOptionalUserId(userId, {
     type: "rivalry",
     tensionScore: { $gte: 65 },
     status: "active"
-  }).populate("source target");
+  })).populate("source target");
 
   const rivalryCandidates = rivalries
-    .filter((link) => link.source?.status === "alive" && link.target?.status === "alive")
+    .filter((link) => link.source?.status === "alive" && link.target?.status === "alive" && !link.target?.isCulprit)
     .sort((a, b) => vulnerabilityScore(b.target) - vulnerabilityScore(a.target));
   const rivalry = pickRandom(rivalryCandidates.slice(0, 3));
   if (!rivalry) {
@@ -1052,7 +947,18 @@ async function assassinationAttempt() {
       actor: attacker._id,
       faction: attacker.faction,
       metadata: { tensionScore: rivalry.tensionScore, aiKill: true }
-    });
+    }, userId);
+
+    await recalibrateIndividual(
+      userId,
+      attacker,
+      {
+        powerLevel: 18,
+        influenceScore: 6,
+        fearFactor: 10
+      },
+      `the hit on ${target.name}`
+    );
 
     await refreshDominanceScores([attacker._id, target._id]);
     return true;
@@ -1063,22 +969,22 @@ async function assassinationAttempt() {
   return false;
 }
 
-async function outsiderRise() {
-  const outsiders = await Person.find({
+async function outsiderRise(userId = null) {
+  const outsiders = await Person.find(withOptionalUserId(userId, {
     isOutsider: true,
     status: "alive"
-  });
+  }));
 
   const outsider = pickRandom(outsiders);
-  if (!outsiders) {
+  if (!outsider) {
     return null;
   }
 
-  const weakTargets = await Person.find({
+  const weakTargets = await Person.find(withOptionalUserId(userId, {
     status: "alive",
     _id: { $ne: outsider._id },
     $or: [{ loyaltyScore: { $lt: 45 } }, { powerLevel: { $lt: 260 } }]
-  }).sort({ loyaltyScore: 1, powerLevel: 1 });
+  })).sort({ loyaltyScore: 1, powerLevel: 1 });
 
   const target = pickRandom(weakTargets);
   if (!target) {
@@ -1094,26 +1000,42 @@ async function outsiderRise() {
           ? "intimidation"
           : "ego";
 
-  outsider.powerLevel = clamp(outsider.powerLevel + 45, 0, 1000);
-  outsider.influenceScore = clamp(outsider.influenceScore + 6, 0, 100);
-  await outsider.save();
-
-  target.loyaltyScore = clamp(target.loyaltyScore - 12, 0, 100);
   target.ambitionLevel = clamp(target.ambitionLevel + 8, 0, 100);
   await target.save();
 
-  await Relationship.findOneAndUpdate(
+  await recalibrateIndividual(
+    userId,
+    outsider,
     {
+      powerLevel: 45,
+      influenceScore: 6,
+      fearFactor: 4
+    },
+    `exploiting ${target.name}`
+  );
+  await recalibrateIndividual(
+    userId,
+    target,
+    {
+      loyaltyScore: -12,
+      powerLevel: -6
+    },
+    `being manipulated by ${outsider.name}`
+  );
+
+  await Relationship.findOneAndUpdate(
+    withOptionalUserId(userId, {
       source: outsider._id,
       target: target._id,
       type: "alliance"
-    },
+    }),
     {
       $set: {
         source: outsider._id,
         target: target._id,
         type: "alliance",
         status: "active",
+        ...(userId && { userId }),
         details: `${outsider.name} exploited ${target.name}'s ${exploitTag} weakness.`,
         tensionScore: 28
       },
@@ -1122,7 +1044,7 @@ async function outsiderRise() {
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
-  await createEvent({
+  await createEvent(userId, {
     type: "alliance",
     headline: `${outsider.name} gains ground`,
     summary: `${outsider.name} used ${exploitTag} tactics against ${target.name}, turning weakness into influence.`,
@@ -1136,14 +1058,14 @@ async function outsiderRise() {
   return outsider;
 }
 
-async function generateEmergentCharacter() {
-  const balance = await getPopulationBalance();
+async function generateEmergentCharacter(userId = null) {
+  const balance = await getPopulationBalance(userId);
   if (balance.surplus >= simulationState.populationPressureThreshold) {
     return null;
   }
 
   const factions = await Person.aggregate([
-    { $match: { role: "criminal", status: "alive" } },
+    { $match: withOptionalUserId(userId, { role: "criminal", status: "alive" }) },
     { $group: { _id: "$faction", count: { $sum: 1 }, avgLoyalty: { $avg: "$loyaltyScore" } } },
     { $sort: { avgLoyalty: 1, count: 1 } }
   ]);
@@ -1157,6 +1079,7 @@ async function generateEmergentCharacter() {
   const alias = pickRandom(aliases);
 
   const person = await Person.create({
+    ...(userId && { userId }),
     name,
     alias,
     role,
@@ -1177,6 +1100,7 @@ async function generateEmergentCharacter() {
   });
 
   const anchor = await Person.findOne({
+    ...(userId && { userId }),
     faction: person.faction,
     status: "alive",
     _id: { $ne: person._id }
@@ -1199,6 +1123,7 @@ async function generateEmergentCharacter() {
 
   if (anchor) {
     await Relationship.create({
+      ...(userId && { userId }),
       source: person._id,
       target: anchor._id,
       type: isOutsider ? "alliance" : "command",
@@ -1219,7 +1144,7 @@ async function generateEmergentCharacter() {
     }
   }
 
-  await createEvent({
+  await createEvent(userId, {
     type: "emergence",
     headline: `${person.name} enters the board`,
     summary: `${person.name}, known as ${person.alias}, arrived with a ${backgroundTier} background and ${person.powerLevel} power.`,
@@ -1233,12 +1158,12 @@ async function generateEmergentCharacter() {
   return person;
 }
 
-async function betrayalEvent() {
-  const candidates = await Person.find({
+async function betrayalEvent(userId = null) {
+  const candidates = await Person.find(withOptionalUserId(userId, {
     status: "alive",
     ambitionLevel: { $gte: 68 },
     loyaltyScore: { $lte: 42 }
-  }).sort({ ambitionLevel: -1 });
+  })).sort({ ambitionLevel: -1 });
 
   const betrayer = pickRandom(candidates);
   if (!betrayer) {
@@ -1246,6 +1171,7 @@ async function betrayalEvent() {
   }
 
   const boss = await Person.findOne({
+    ...(userId && { userId }),
     faction: betrayer.faction,
     isBoss: true,
     status: "alive"
@@ -1256,32 +1182,40 @@ async function betrayalEvent() {
   }
 
   betrayer.faction = "Independent";
-  betrayer.powerLevel = clamp(betrayer.powerLevel + 70, 0, 1000);
-  betrayer.influenceScore = clamp(betrayer.influenceScore + 8, 0, 100);
-  await betrayer.save();
+  await recalibrateIndividual(
+    userId,
+    betrayer,
+    {
+      powerLevel: 70,
+      influenceScore: 8,
+      loyaltyScore: -10
+    },
+    `breaking away from ${boss.name}`
+  );
 
   await Relationship.updateMany(
-    {
+    withOptionalUserId(userId, {
       $or: [{ source: betrayer._id }, { target: betrayer._id }],
       type: { $in: ["command", "alliance"] }
-    },
+    }),
     {
       $set: { status: "severed" }
     }
   );
 
   await Relationship.findOneAndUpdate(
-    {
+    withOptionalUserId(userId, {
       source: boss._id,
       target: betrayer._id,
       type: "rivalry"
-    },
+    }),
     {
       $set: {
         source: boss._id,
         target: betrayer._id,
         type: "rivalry",
         status: "active",
+        ...(userId && { userId }),
         tensionScore: 92,
         details: `${betrayer.name} betrayed ${boss.name} and split from the organization.`
       },
@@ -1290,7 +1224,7 @@ async function betrayalEvent() {
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
-  await createEvent({
+  await createEvent(userId, {
     type: "betrayal",
     headline: `${betrayer.name} betrays ${boss.name}`,
     summary: `${betrayer.name} broke rank and turned independent, destabilizing ${boss.faction}.`,
@@ -1304,38 +1238,46 @@ async function betrayalEvent() {
   return betrayer;
 }
 
-async function policeRaid({ lethalBias = false } = {}) {
-  const raidCandidates = await Person.find({
+async function policeRaid(userId = null, { lethalBias = false } = {}) {
+  const raidCandidates = await Person.find(withOptionalUserId(userId, {
     role: "criminal",
-    status: "alive"
-  }).sort({ createdAt: -1 });
+    status: "alive",
+    isCulprit: { $ne: true }
+  })).sort({ createdAt: -1 });
   const target = raidCandidates.sort((a, b) => vulnerabilityScore(b) - vulnerabilityScore(a))[0];
   if (!target) {
     return null;
   }
 
-  const officer = await Person.findOne({
+  const officer = await Person.findOne(withOptionalUserId(userId, {
     role: "police",
     status: "alive"
-  }).sort({ integrityScore: -1, casesSolved: -1 });
+  })).sort({ integrityScore: -1, casesSolved: -1 });
 
   if (!officer) {
     return null;
   }
 
-  const corruptShield = await Relationship.findOne({
+  const corruptShield = await Relationship.findOne(withOptionalUserId(userId, {
     type: "corruption",
     status: "active",
     $or: [
       { source: target._id, target: officer._id },
       { source: officer._id, target: target._id }
     ]
-  });
+  }));
 
   if (corruptShield || officer.isCorrupt) {
-    target.powerLevel = clamp(target.powerLevel + 20, 0, 1000);
-    await target.save();
-    await createEvent({
+    await recalibrateIndividual(
+      userId,
+      target,
+      {
+        powerLevel: 20,
+        influenceScore: 4
+      },
+      "surviving a compromised raid"
+    );
+    await createEvent(userId, {
       type: "raid",
       headline: `${target.name} dodges a raid`,
       summary: `A raid was compromised by corruption, allowing ${target.name} to stay in play.`,
@@ -1361,19 +1303,47 @@ async function policeRaid({ lethalBias = false } = {}) {
       actor: officer._id,
       faction: target.faction,
       metadata: { aiKill: true, source: "raid" }
-    });
+    }, userId);
     officer.casesSolved += 1;
     await officer.save();
+    await recalibrateIndividual(
+      userId,
+      officer,
+      {
+        powerLevel: 16,
+        influenceScore: 7,
+        fearFactor: 5
+      },
+      `erasing ${target.name}`
+    );
     await refreshDominanceScores([target._id, officer._id]);
     return "killed";
   }
 
-  target.powerLevel = clamp(target.powerLevel - 90, 0, 1000);
-  target.influenceScore = clamp(target.influenceScore - 10, 0, 100);
   officer.casesSolved += 1;
-  await Promise.all([target.save(), officer.save()]);
+  officer.encounters = (officer.encounters || 0) + 1;
+  await officer.save();
+  await recalibrateIndividual(
+    userId,
+    target,
+    {
+      powerLevel: -90,
+      influenceScore: -10,
+      fearFactor: -6
+    },
+    `being hit by ${officer.name}`
+  );
+  await recalibrateIndividual(
+    userId,
+    officer,
+    {
+      powerLevel: 8,
+      influenceScore: 4
+    },
+    `cracking down on ${target.name}`
+  );
 
-  await createEvent({
+  await createEvent(userId, {
     type: "raid",
     headline: `${officer.name} cracks down on ${target.name}`,
     summary: `${officer.name} disrupted ${target.name}'s operations and fractured part of the power structure.`,
@@ -1386,27 +1356,178 @@ async function policeRaid({ lethalBias = false } = {}) {
   return "hit";
 }
 
-async function populationPressureKill(balance) {
-  const candidates = await Person.find({
+async function createProceduralCrime(userId = null) {
+  const { User } = require("./models");
+  const user = userId ? await User.findById(userId) : null;
+  const culprit =
+    user?.culpritPersonId
+      ? await Person.findOne({ _id: user.culpritPersonId, userId, status: "alive" })
+      : null;
+  const criminals = await Person.find(withOptionalUserId(userId, {
+    role: "criminal",
+    status: "alive"
+  })).sort({ powerLevel: -1, ambitionLevel: -1 });
+
+  const primary = culprit && Math.random() > 0.45 ? culprit : pickRandom(criminals.slice(0, 5));
+  if (!primary) {
+    return null;
+  }
+
+  const accomplices = criminals
+    .filter((person) => person._id.toString() !== primary._id.toString())
+    .sort(() => Math.random() - 0.5)
+    .slice(0, Math.random() > 0.55 ? 1 : 0);
+  const suspects = [primary, ...accomplices];
+  const template = pickRandom(proceduralCrimeCatalog);
+  const district = primary.clueProfile?.district || pickRandom(cityDistricts);
+
+  const crime = await Crime.create({
+    userId,
+    crimeId: nextCrimeId(),
+    title: template.title,
+    category: template.category,
+    status: Math.random() > 0.45 ? "open" : "investigating",
+    committedBy: suspects.map((person) => person._id),
+    occurredAt: new Date(),
+    district,
+    evidence: "Fragments of surveillance, local chatter, and partial transaction records.",
+    summary: template.summary
+  });
+
+  await Promise.all(
+    suspects.map(async (person) => {
+      person.cases = (person.cases || 0) + 1;
+      person.money = (person.money || 0) + randomInt(40000, 220000);
+      person.crimesCommitted = [...(person.crimesCommitted || []), template.category].slice(-8);
+      if (template.violent) {
+        person.murders = (person.murders || 0) + 1;
+      }
+      await person.save();
+      await recalibrateIndividual(
+        userId,
+        person,
+        {
+          powerLevel: template.violent ? 16 : 10,
+          influenceScore: 4,
+          fearFactor: template.violent ? 8 : 3
+        },
+        `the ${crime.title} operation`
+      );
+    })
+  );
+
+  await createEvent(userId, {
+    type: "crime",
+    headline: `${crime.title} opens a new case`,
+    summary: `${suspects.map((person) => person.name).join(", ")} triggered a ${crime.category.toLowerCase()} case in ${district}. Feed clue: the scene points toward ${primary.clueProfile?.method || "a practiced hand"}.`,
+    actor: primary._id,
+    target: accomplices[0]?._id,
+    faction: primary.faction,
+    metadata: { crimeId: crime.crimeId, district, category: crime.category, culpritSignal: Boolean(primary.isCulprit) }
+  });
+
+  await refreshDominanceScores(suspects.map((person) => person._id));
+  return crime;
+}
+
+async function solvePendingCase(userId = null) {
+  const { User } = require("./models");
+  const user = userId ? await User.findById(userId) : null;
+  const pendingCrime = await Crime.findOne(withOptionalUserId(userId, {
+    status: { $in: ["open", "investigating"] }
+  }))
+    .populate("committedBy")
+    .sort({ occurredAt: 1 });
+
+  if (!pendingCrime) {
+    return null;
+  }
+
+  const officer = await Person.findOne(withOptionalUserId(userId, {
+    role: "police",
+    status: "alive"
+  })).sort({ casesSolved: -1, integrityScore: -1, intelligenceLevel: -1 });
+
+  if (!officer) {
+    return null;
+  }
+
+  pendingCrime.status = "solved";
+  pendingCrime.solvedBy = officer._id;
+  pendingCrime.evidence = `${pendingCrime.evidence || "Collected evidence"}; final warrants executed successfully.`;
+  await pendingCrime.save();
+
+  officer.cases = (officer.cases || 0) + 1;
+  officer.casesSolved = (officer.casesSolved || 0) + 1;
+  officer.encounters = (officer.encounters || 0) + 1;
+  await officer.save();
+
+  await recalibrateIndividual(
+    userId,
+    officer,
+    {
+      powerLevel: 10,
+      influenceScore: 6,
+      fearFactor: 2
+    },
+    `closing case ${pendingCrime.crimeId}`
+  );
+
+  await Promise.all(
+    (pendingCrime.committedBy || []).map(async (criminal) => {
+      const person = await Person.findById(criminal._id);
+      if (!person || person.status === "dead") {
+        return;
+      }
+      await recalibrateIndividual(
+        userId,
+        person,
+        {
+          powerLevel: -12,
+          influenceScore: -6,
+          fearFactor: -4,
+          loyaltyScore: -2
+        },
+        `the fallout from case ${pendingCrime.crimeId}`
+      );
+    })
+  );
+
+  await createEvent(userId, {
+    type: "investigation",
+    headline: `${officer.name} closes ${pendingCrime.crimeId}`,
+    summary: `${officer.name} solved ${pendingCrime.title} and forced the case ledger in the city's favor.${user?.culpritPersonId && pendingCrime.committedBy?.some((person) => person._id.toString() === user.culpritPersonId.toString()) ? " The case file mentions the same signature seen in earlier clue drops." : ""}`,
+    actor: officer._id,
+    target: pendingCrime.committedBy?.[0]?._id,
+    faction: officer.faction,
+    metadata: { crimeId: pendingCrime.crimeId, title: pendingCrime.title }
+  });
+
+  return pendingCrime;
+}
+
+async function populationPressureKill(userId = null, balance) {
+  const candidates = await Person.find(withOptionalUserId(userId, {
     status: "alive",
     role: "criminal",
-    isBoss: false
-  }).sort({ isOutsider: -1, createdAt: -1, loyaltyScore: 1, powerLevel: 1 });
+    isBoss: false,
+    isCulprit: { $ne: true }
+  })).sort({ isOutsider: -1, createdAt: -1, loyaltyScore: 1, powerLevel: 1 });
 
   const target = candidates[0];
   if (!target) {
     return null;
   }
 
-  const rivalry = await Relationship.findOne({
+  const rivalry = await Relationship.findOne(withOptionalUserId(userId, {
     type: "rivalry",
     status: "active",
     $or: [{ source: target._id }, { target: target._id }]
-  }).populate("source target");
+  })).populate("source target");
 
   const killer =
     (rivalry && rivalry.source._id.toString() === target._id.toString() ? rivalry.target : rivalry?.source) ||
-    (await Person.findOne({ role: "police", status: "alive" }).sort({ integrityScore: -1, casesSolved: -1 }));
+    (await Person.findOne(withOptionalUserId(userId, { role: "police", status: "alive" })).sort({ integrityScore: -1, casesSolved: -1 }));
 
   await markPersonDead(target, {
     type: killer ? "assassination" : "elimination",
@@ -1415,11 +1536,19 @@ async function populationPressureKill(balance) {
     actor: killer?._id,
     faction: target.faction,
     metadata: { aiKill: true, source: "population-pressure", surplusBeforeKill: balance.surplus }
-  });
+  }, userId);
 
   if (killer) {
-    killer.powerLevel = clamp(killer.powerLevel + 25, 0, 1000);
-    await killer.save();
+    await recalibrateIndividual(
+      userId,
+      killer,
+      {
+        powerLevel: 25,
+        influenceScore: 5,
+        fearFactor: 6
+      },
+      `surviving the city's population squeeze`
+    );
     await refreshDominanceScores([killer._id, target._id]);
   } else {
     await refreshDominanceScores([target._id]);
@@ -1428,11 +1557,11 @@ async function populationPressureKill(balance) {
   return target;
 }
 
-async function increaseTension() {
-  const activeRelationships = await Relationship.find({
+async function increaseTension(userId = null) {
+  const activeRelationships = await Relationship.find(withOptionalUserId(userId, {
     status: "active",
     type: { $in: ["alliance", "transaction", "rivalry", "corruption"] }
-  });
+  }));
 
   await Promise.all(
     activeRelationships.map(async (relationship) => {
@@ -1447,45 +1576,87 @@ async function increaseTension() {
   );
 }
 
-async function runSimulationTick(reason = "auto") {
-  await hydrateLoreProfiles();
-  await refreshDominanceScores();
-  await increaseTension();
+async function runSimulationTick(userIdOrReason = "auto", maybeReason = null) {
+  const userId = maybeReason === null ? null : userIdOrReason;
+  const reason = maybeReason === null ? userIdOrReason : maybeReason;
 
-  let balance = await getPopulationBalance();
+  if (userId) {
+    await ensureCulpritForUser(userId);
+  }
+
+  await hydrateLoreProfiles();
+  await refreshDominanceScores(null, userId);
+  await increaseTension(userId);
+
+  const [criminalCount, unsolvedCaseCount] = await Promise.all([
+    Person.countDocuments(withOptionalUserId(userId, { role: "criminal", status: "alive" })),
+    Crime.countDocuments(withOptionalUserId(userId, { status: { $in: ["open", "investigating"] } }))
+  ]);
+  let balance = await getPopulationBalance(userId);
   let eventType = "simulation";
+  let outcome = null;
 
   if (balance.surplus >= simulationState.populationPressureThreshold) {
-    const killed = (await populationPressureKill(balance)) || (await assassinationAttempt()) || (await policeRaid({ lethalBias: true }));
-    eventType = killed ? "population-pressure-kill" : "assassination";
+    outcome =
+      (await populationPressureKill(userId, balance)) ||
+      (await assassinationAttempt(userId)) ||
+      (await policeRaid(userId, { lethalBias: true })) ||
+      (await solvePendingCase(userId));
+    eventType = outcome ? "population-pressure-kill" : "simulation";
   } else {
     const roll = Math.random();
-    if (roll < 0.2) {
-      await outsiderRise();
-      eventType = "outsider-rise";
-    } else if (roll < 0.3 && balance.surplus < simulationState.populationPressureThreshold - 1) {
-      await generateEmergentCharacter();
-      eventType = "emergence";
-    } else if (roll < 0.45) {
-      await betrayalEvent();
-      eventType = "betrayal";
-    } else if (roll < 0.68) {
-      await assassinationAttempt();
-      eventType = "assassination";
-    } else if (roll < 0.88) {
-      await policeRaid({ lethalBias: balance.pressure === "rising" });
-      eventType = "raid";
+    const creationThreshold = criminalCount < 12 ? 0.32 : 0.18;
+    const newCaseThreshold = unsolvedCaseCount < 3 ? creationThreshold + 0.24 : creationThreshold + 0.18;
+    const solveCaseThreshold = newCaseThreshold + 0.14;
+    const betrayalThreshold = solveCaseThreshold + 0.14;
+    const assassinationThreshold = betrayalThreshold + 0.14;
+    const raidThreshold = assassinationThreshold + 0.12;
+
+    if (roll < creationThreshold && balance.surplus < simulationState.populationPressureThreshold - 1) {
+      outcome = await generateEmergentCharacter(userId);
+      eventType = outcome ? "emergence" : "simulation";
+    } else if (roll < newCaseThreshold) {
+      outcome = await createProceduralCrime(userId);
+      eventType = outcome ? "crime" : "simulation";
+    } else if (roll < solveCaseThreshold) {
+      outcome = await solvePendingCase(userId);
+      eventType = outcome ? "investigation" : "simulation";
+    } else if (roll < betrayalThreshold) {
+      outcome = await betrayalEvent(userId);
+      eventType = outcome ? "betrayal" : "simulation";
+    } else if (roll < assassinationThreshold) {
+      outcome = await assassinationAttempt(userId);
+      eventType = outcome ? "assassination" : "simulation";
+    } else if (roll < raidThreshold) {
+      outcome = await policeRaid(userId, { lethalBias: balance.pressure === "rising" });
+      eventType = outcome ? "raid" : "simulation";
     } else {
-      await createEvent({
-        type: "simulation",
-        headline: "Power recalibrates",
-        summary: "Whispers, tribute, and fear reshaped the underworld without a public flashpoint.",
-        metadata: { reason }
-      });
+      outcome = await outsiderRise(userId);
+      eventType = outcome ? "outsider-rise" : "simulation";
     }
   }
 
-  balance = await getPopulationBalance();
+  if (!outcome) {
+    await createEvent(userId, {
+      type: "simulation",
+      headline: "Power recalibrates",
+      summary: "The city shifted in silence this cycle, but the balance of fear and ambition kept moving.",
+      metadata: { reason, fallback: true }
+    });
+  } else if (eventType === "simulation") {
+    await createEvent(userId, {
+      type: "simulation",
+      headline: "Power recalibrates",
+      summary: "Whispers, tribute, and fear reshaped the underworld without a public flashpoint.",
+      metadata: { reason }
+    });
+  }
+
+  if (userId && Math.random() < 0.6) {
+    await dropCulpritClue(userId);
+  }
+
+  balance = await getPopulationBalance(userId);
   simulationState.lastTickAt = new Date();
   return {
     lastTickAt: simulationState.lastTickAt,
@@ -1514,13 +1685,261 @@ function setSimulationRunning(value) {
   return simulationState;
 }
 
-async function getSimulationState() {
+async function getSimulationState(userId = null) {
   return {
     isRunning: simulationState.isRunning,
     intervalMs: simulationState.intervalMs,
     lastTickAt: simulationState.lastTickAt,
-    population: await getPopulationBalance(),
-    narrativeMode: isGeminiConfigured() ? "hybrid-gemini-local" : "local-only"
+    population: await getPopulationBalance(userId),
+    narrativeMode: "local-only"
+  };
+}
+
+async function ensureCulpritForUser(userId) {
+  const { User } = require("./models");
+  const user = await User.findById(userId);
+  if (!user) {
+    return null;
+  }
+
+  if (user.culpritPersonId) {
+    const existing = await Person.findOne({ _id: user.culpritPersonId, userId });
+    if (existing?.status === "alive") {
+      return existing;
+    }
+  }
+
+  const anchor = await Person.findOne({ userId, role: "criminal", status: "alive" }).sort({ influenceScore: -1, powerLevel: -1 });
+  const profile = backgroundProfiles.balanced;
+  const culprit = await Person.create({
+    userId,
+    name: await uniqueGeneratedName(),
+    alias: pickRandom(aliases),
+    role: "criminal",
+    faction: anchor?.faction || "Independent",
+    rank: "Fixer",
+    money: randomInt(profile.money[0], profile.money[1]),
+    cases: randomInt(1, 3),
+    crimesCommitted: ["Conspiracy"],
+    murders: randomInt(0, 2),
+    influenceScore: randomInt(44, 72),
+    powerLevel: randomInt(310, 620),
+    loyaltyScore: randomInt(28, 61),
+    ambitionLevel: randomInt(68, 96),
+    fearFactor: randomInt(38, 82),
+    intelligenceLevel: randomInt(64, 92),
+    isOutsider: Math.random() > 0.65,
+    isCulprit: true,
+    clueProfile: {
+      district: pickRandom(cityDistricts),
+      method: pickRandom(culpritMethods),
+      tell: pickRandom(culpritTells),
+      trait: pickRandom(culpritTraits)
+    },
+    weaknessTags: pickWeaknesses(),
+    backgroundTier: "balanced",
+    backgroundSummary: "A hidden culprit seeded into the city as the user's active target.",
+    backstory: "This operator entered the city with enough connections to stay useful and enough caution to avoid early suspicion."
+  });
+
+  if (anchor) {
+    await Relationship.create({
+      userId,
+      source: culprit._id,
+      target: anchor._id,
+      type: Math.random() > 0.45 ? "alliance" : "transaction",
+      weight: 2,
+      tensionScore: 34,
+      details: `${culprit.name} slipped into ${anchor.name}'s orbit without drawing immediate heat.`
+    });
+  }
+
+  user.culpritPersonId = culprit._id;
+  user.culpritClueStage = 0;
+  user.culpritGuessCount = 0;
+  user.culpritSolved = false;
+  user.culpritRevealedName = null;
+  await user.save();
+
+  await createEvent(userId, {
+    type: "simulation",
+    headline: "A hidden culprit enters the city",
+    summary: "Intelligence flagged a fresh operator moving beneath the surface. The feed will start dropping clues if you watch carefully.",
+    actor: culprit._id,
+    faction: culprit.faction,
+    metadata: { gameStart: true }
+  });
+  await dropCulpritClue(userId);
+
+  return culprit;
+}
+
+async function dropCulpritClue(userId) {
+  const { User } = require("./models");
+  const user = await User.findById(userId);
+  if (!user?.culpritPersonId || user.culpritSolved || (user.culpritGuessCount || 0) >= 3) {
+    return null;
+  }
+
+  const culprit = await Person.findOne({ _id: user.culpritPersonId, userId, status: "alive" });
+  if (!culprit) {
+    return null;
+  }
+
+  const clueStage = user.culpritClueStage || 0;
+  const clueLines = [
+    `Witness chatter points to someone operating around ${culprit.clueProfile?.district}.`,
+    `Forensics keep circling a method: ${culprit.clueProfile?.method}.`,
+    `Street talk says the culprit ${culprit.clueProfile?.tell}.`,
+    `Analysts believe the target profile matches ${culprit.clueProfile?.trait}.`
+  ];
+
+  const summary = clueLines[Math.min(clueStage, clueLines.length - 1)];
+  user.culpritClueStage = clueStage + 1;
+  await user.save();
+
+  await createEvent(userId, {
+    type: "investigation",
+    headline: "Clue logged into the feed",
+    summary,
+    actor: culprit._id,
+    faction: culprit.faction,
+    metadata: { culpritClue: true, clueStage }
+  });
+
+  return true;
+}
+
+async function guessCulprit(userId, suspectId) {
+  const { User } = require("./models");
+  const user = await User.findById(userId);
+  if (!user?.culpritPersonId) {
+    const error = new Error("No culprit game is active");
+    error.status = 400;
+    throw error;
+  }
+
+  if (user.culpritSolved) {
+    return {
+      correct: true,
+      user: serializeUser(user),
+      message: "You already identified the culprit."
+    };
+  }
+
+  if ((user.culpritGuessCount || 0) >= 3) {
+    return {
+      correct: false,
+      user: serializeUser(user),
+      message: "All three guesses have already been used."
+    };
+  }
+
+  const suspect = await Person.findOne({ _id: suspectId, userId });
+  if (!suspect) {
+    const error = new Error("Suspect not found");
+    error.status = 404;
+    throw error;
+  }
+
+  const culprit = await Person.findOne({ _id: user.culpritPersonId, userId });
+  const isCorrect = culprit && culprit._id.toString() === suspect._id.toString();
+
+  user.culpritGuessCount = (user.culpritGuessCount || 0) + 1;
+
+  if (isCorrect) {
+    user.culpritSolved = true;
+    user.culpritRevealedName = culprit.name;
+    await user.save();
+
+    await createEvent(userId, {
+      type: "investigation",
+      headline: "Culprit identified",
+      summary: `${suspect.name} matched the clue trail. The operator cracked the case before running out of guesses.`,
+      actor: suspect._id,
+      faction: suspect.faction,
+      metadata: { culpritSolved: true }
+    });
+
+    return {
+      correct: true,
+      user: serializeUser(user),
+      message: `${suspect.name} is the culprit. Case closed.`
+    };
+  }
+
+  const attemptsRemaining = Math.max(0, 3 - user.culpritGuessCount);
+  if (attemptsRemaining === 0) {
+    user.culpritRevealedName = culprit?.name || null;
+  }
+  await user.save();
+
+  await createEvent(userId, {
+    type: "investigation",
+    headline: attemptsRemaining === 0 ? "Final guess missed" : "Wrong suspect flagged",
+    summary:
+      attemptsRemaining === 0
+        ? `${suspect.name} was not the culprit. The real culprit was ${culprit?.name || "never identified"} and the file is now locked.`
+        : `${suspect.name} does not fit the clue trail. ${attemptsRemaining} guess${attemptsRemaining === 1 ? "" : "es"} remain.`,
+    actor: suspect._id,
+    target: culprit?._id,
+    faction: suspect.faction,
+    metadata: { culpritGuess: true, attemptsRemaining }
+  });
+
+  return {
+    correct: false,
+    user: serializeUser(user),
+    message:
+      attemptsRemaining === 0
+        ? `${suspect.name} was wrong. The culprit was ${culprit?.name || "unknown"}.`
+        : `${suspect.name} is not the culprit. ${attemptsRemaining} guess${attemptsRemaining === 1 ? "" : "es"} left.`
+  };
+}
+
+async function restartCulpritGame(userId) {
+  const { User } = require("./models");
+  const user = await User.findById(userId);
+  if (!user) {
+    const error = new Error("User not found");
+    error.status = 404;
+    throw error;
+  }
+
+  if (!user.culpritSolved) {
+    const error = new Error("Restart is only available after solving the case");
+    error.status = 400;
+    throw error;
+  }
+
+  if (user.culpritPersonId) {
+    const previousCulprit = await Person.findOne({ _id: user.culpritPersonId, userId });
+    if (previousCulprit) {
+      previousCulprit.isCulprit = false;
+      await previousCulprit.save();
+    }
+  }
+
+  user.culpritPersonId = null;
+  user.culpritClueStage = 0;
+  user.culpritGuessCount = 0;
+  user.culpritSolved = false;
+  user.culpritRevealedName = null;
+  await user.save();
+
+  const culprit = await ensureCulpritForUser(userId);
+  await createEvent(userId, {
+    type: "investigation",
+    headline: "Fresh hunt opened",
+    summary: `${culprit?.name || "A new culprit"} slipped into the city. A new clue trail is now active.`,
+    actor: culprit?._id || null,
+    faction: culprit?.faction || "Independent",
+    metadata: { culpritRestarted: true }
+  });
+
+  const refreshedUser = await User.findById(userId);
+  return {
+    user: serializeUser(refreshedUser)
   };
 }
 
@@ -1530,8 +1949,7 @@ function emitGraphRefresh(io, reason) {
   }
   setTimeout(async () => {
     try {
-      const graph = await getDashboardGraph();
-      io.emit("graph:refresh", { graph, reason, timestamp: new Date() });
+      io.emit("graph:refresh", { reason, timestamp: new Date() });
     } catch (error) {
       console.error("Failed to emit graph refresh", error);
     }
@@ -1547,6 +1965,26 @@ function generateToken(user) {
     JWT_SECRET,
     { expiresIn: "7d" }
   );
+}
+
+function serializeUser(user) {
+  const attemptsRemaining = Math.max(0, 3 - (user.culpritGuessCount || 0));
+  const culpritStatus = user.culpritSolved ? "solved" : attemptsRemaining === 0 ? "locked" : "active";
+  return {
+    _id: user._id,
+    username: user.username,
+    operatorName: user.operatorName || user.username,
+    email: user.email,
+    role: user.role,
+    title: user.title || "Field Analyst",
+    division: user.division || "Intelligence Unit",
+    culpritGame: {
+      status: culpritStatus,
+      attemptsRemaining,
+      guessesUsed: user.culpritGuessCount || 0,
+      culpritRevealedName: user.culpritRevealedName || null
+    }
+  };
 }
 
 async function registerUser({ username, email, password }) {
@@ -1566,9 +2004,10 @@ async function registerUser({ username, email, password }) {
   
   // Initialize starter world for new user
   await createStarterWorld(user._id);
+  await ensureCulpritForUser(user._id);
 
   return {
-    user: { _id: user._id, username: user.username, email: user.email, role: user.role },
+    user: serializeUser(user),
     token
   };
 }
@@ -1591,13 +2030,61 @@ async function loginUser({ email, password }) {
 
   user.lastLogin = new Date();
   await user.save();
+  await ensureCulpritForUser(user._id);
 
   const token = generateToken(user);
-  
+
   return {
-    user: { _id: user._id, username: user.username, email: user.email, role: user.role },
+    user: serializeUser(user),
     token
   };
+}
+
+async function getCurrentUser(userId) {
+  const { User } = require("./models");
+  const user = await User.findById(userId);
+  if (!user) {
+    const error = new Error("User not found");
+    error.status = 404;
+    throw error;
+  }
+  return serializeUser(user);
+}
+
+async function updateCurrentUser(userId, payload) {
+  const { User } = require("./models");
+  const user = await User.findById(userId);
+  if (!user) {
+    const error = new Error("User not found");
+    error.status = 404;
+    throw error;
+  }
+
+  if (typeof payload.email === "string" && payload.email.trim() !== user.email) {
+    const email = payload.email.trim();
+    const existingUser = await User.findOne({ email, _id: { $ne: userId } });
+    if (existingUser) {
+      const error = new Error("Email already exists");
+      error.status = 400;
+      throw error;
+    }
+    user.email = email;
+  }
+
+  if (typeof payload.operatorName === "string") {
+    user.operatorName = payload.operatorName.trim() || user.username;
+  }
+
+  if (typeof payload.title === "string") {
+    user.title = payload.title.trim() || "Field Analyst";
+  }
+
+  if (typeof payload.division === "string") {
+    user.division = payload.division.trim() || "Intelligence Unit";
+  }
+
+  await user.save();
+  return serializeUser(user);
 }
 
 function authenticateToken(req, res, next) {
@@ -1792,6 +2279,8 @@ async function createStarterWorld(userId) {
     }
   ]);
 
+  await ensureCulpritForUser(userId);
+
   return { people, relationships: await Relationship.find({ userId }), crimes: await Crime.find({ userId }) };
 }
 
@@ -1829,8 +2318,11 @@ module.exports = {
   setSimulationRunning,
   getSimulationState,
   emitGraphRefresh,
-  isGeminiConfigured,
+  guessCulprit,
+  restartCulpritGame,
   registerUser,
   loginUser,
+  getCurrentUser,
+  updateCurrentUser,
   authenticateToken
 };

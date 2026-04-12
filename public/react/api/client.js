@@ -20,9 +20,20 @@ async function request(path, options = {}, token) {
 }
 
 export const api = {
+  getCurrentUser: (token) => request("/api/auth/me", {}, token),
+  updateCurrentUser: (payload, token) =>
+    request("/api/auth/me", {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }, token),
   getDashboard: (token) => request("/api/dashboard/graph", {}, token),
   getAnalytics: (token) => request("/api/dashboard/analytics", {}, token),
   getSimulation: (token) => request("/api/dashboard/simulation", {}, token),
+  guessCulprit: (suspectId, token) =>
+    request("/api/dashboard/culprit/guess", {
+      method: "POST",
+      body: JSON.stringify({ suspectId })
+    }, token),
   
   updatePersonStatus: (id, status, token) =>
     request(`/api/people/${id}`, {

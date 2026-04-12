@@ -144,14 +144,6 @@ export const mockDashboard = {
     corruptionNetwork: {
       nodes: [],
       links: []
-    },
-    powerNetwork: {
-      nodes: [],
-      links: []
-    },
-    hierarchy: {
-      name: "The Outfit",
-      children: []
     }
   }
 };
@@ -159,7 +151,6 @@ export const mockDashboard = {
 mockDashboard.views.criminalNetwork.nodes = mockDashboard.people.filter((person) => person.role === "criminal");
 mockDashboard.views.policeNetwork.nodes = mockDashboard.people.filter((person) => person.role === "police");
 mockDashboard.views.corruptionNetwork.nodes = mockDashboard.people;
-mockDashboard.views.powerNetwork.nodes = mockDashboard.people.filter((person) => person.role === "criminal");
 mockDashboard.views.criminalNetwork.links = [
   {
     _id: "r1",
@@ -180,7 +171,6 @@ mockDashboard.views.criminalNetwork.links = [
     startedAt: now
   }
 ];
-mockDashboard.views.powerNetwork.links = mockDashboard.views.criminalNetwork.links;
 mockDashboard.views.policeNetwork.links = [
   {
     _id: "r3",
@@ -204,29 +194,6 @@ mockDashboard.views.corruptionNetwork.links = [
     startedAt: now
   }
 ];
-mockDashboard.views.hierarchy = {
-  _id: "m1",
-  name: "Lucas Moretti",
-  rank: "Boss",
-  influenceScore: 97,
-  children: [
-    {
-      _id: "m2",
-      name: "Paolo Conti",
-      rank: "Underboss",
-      influenceScore: 76,
-      children: [
-        {
-          _id: "m3",
-          name: "Raven Doss",
-          rank: "Fixer",
-          influenceScore: 41,
-          children: []
-        }
-      ]
-    }
-  ]
-};
 
 export const mockAnalytics = {
   summary: {
@@ -297,7 +264,7 @@ export const mockAnalytics = {
 export const mockSimulation = {
   isRunning: true,
   lastTickAt: now,
-  narrativeMode: "hybrid-gemini-local",
+  narrativeMode: "local-only",
   population: {
     generatedCount: 6,
     killCount: 4,

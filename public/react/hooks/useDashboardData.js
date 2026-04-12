@@ -10,14 +10,16 @@ export function useDashboardData(token) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const loadAll = useCallback(async () => {
+  const loadAll = useCallback(async ({ background = false } = {}) => {
     if (!token) {
       setLoading(false);
       return;
     }
 
     setError("");
-    setLoading(true);
+    if (!background) {
+      setLoading(true);
+    }
 
     try {
       const [dashboardData, analyticsData, simulationData] = await Promise.all([
@@ -33,7 +35,9 @@ export function useDashboardData(token) {
       console.error("Failed to load dashboard data", loadError);
       setError(loadError.message || "Failed to load data");
     } finally {
-      setLoading(false);
+      if (!background) {
+        setLoading(false);
+      }
     }
   }, [token]);
 
@@ -48,7 +52,7 @@ export function useDashboardData(token) {
 
     const socket = window.io();
     const handleRefresh = async () => {
-      await loadAll();
+      await loadAll({ background: true });
     };
 
     socket.on("graph:refresh", handleRefresh);
@@ -69,32 +73,32 @@ export function useDashboardData(token) {
       refresh: loadAll,
       async updatePersonStatus(id, status) {
         await api.updatePersonStatus(id, status, token);
-        await loadAll();
+        await loadAll({ background: true });
       },
       async createCrime(payload) {
         await api.createCrime(payload, token);
-        await loadAll();
+        await loadAll({ background: true });
       },
       async updateCrime(id, payload) {
         await api.updateCrime(id, payload, token);
-        await loadAll();
+        await loadAll({ background: true });
       },
       async toggleSimulation(isRunning) {
         const nextState = await api.toggleSimulation(isRunning, token);
         setSimulation(nextState);
-        await loadAll();
+        await loadAll({ background: true });
       },
       async runSimulationTick(reason) {
         await api.runSimulationTick(reason, token);
-        await loadAll();
+        await loadAll({ background: true });
       },
       async promoteCharacter(id) {
         await api.promoteCharacter(id, token);
-        await loadAll();
+        await loadAll({ background: true });
       },
       async eliminateCharacter(id) {
         await api.eliminateCharacter(id, token);
-        await loadAll();
+        await loadAll({ background: true });
       }
     }),
     [loadAll, token]

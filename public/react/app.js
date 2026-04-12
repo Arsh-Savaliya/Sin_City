@@ -1,43 +1,139 @@
 import { React, html } from "./lib/html.js";
+import { api } from "./api/client.js";
 import { useDashboardData } from "./hooks/useDashboardData.js";
 import { NetworkGraph } from "./components/graphs/NetworkGraph.js";
-import { HierarchyGraph } from "./components/graphs/HierarchyGraph.js";
 import { Sidebar } from "./components/layout/Sidebar.js";
+import { Icons } from "./components/layout/icons.js";
 import { AuthScreen } from "./components/AuthScreen.js";
-import { getGraphForView, viewOptions, clampPercent, buildMessages } from "./utils/dashboard.js";
-import { mockMessages, mockUserProfile } from "./data/mockData.js";
+import { getGraphForView, viewOptions, buildMessages, formatTime } from "./utils/dashboard.js";
+import { mockMessages } from "./data/mockData.js";
 
 const { useEffect, useMemo, useState } = React;
 
-export function App() {
-  const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem("bh_user");
-    return saved ? JSON.parse(saved) : null;
-  });
-  const [token, setToken] = useState(() => localStorage.getItem("bh_token"));
-
-  const { dashboard, analytics, simulation, loading, error, actions } = useDashboardData(token);
-  const [currentPage, setCurrentPage] = useState("networks");
-  const [selectedNode, setSelectedNode] = useState(null);
-
-  // Show auth screen if not logged in
-  if (!user || !token) {
-    return html`<${AuthScreen} onLogin=${(u, t) => { setUser(u); setToken(t); }} />`;
+function normalizeUserProfile(user) {
+  if (!user) {
+    return null;
   }
 
-  // Show loading while fetching data
+  return {
+    ...user,
+    operatorName: user.operatorName || user.username || "Operator",
+    title: user.title || "Field Analyst",
+    division: user.division || "Intelligence Unit"
+  };
+}
+
+function getStoredUser() {
+  const saved = localStorage.getItem("bh_user");
+  if (!saved) {
+    return null;
+  }
+
+  try {
+    return normalizeUserProfile(JSON.parse(saved));
+  } catch (_error) {
+    return null;
+  }
+}
+
+function statForNode(node) {
+  if (!node) {
+    return [];
+  }
+
+  if (node.role === "police") {
+    return [
+      { label: "Power", value: node.powerLevel || 0 },
+      { label: "Influence", value: node.influenceScore || 0 },
+      { label: "Encounters", value: node.encounters || node.cases || 0 },
+      { label: "Cases Solved", value: node.casesSolved || 0 },
+      { label: "Integrity", value: node.integrityScore || 0 },
+      { label: "Underworld", value: node.isCorrupt ? node.underworldPower || 0 : "Clean" }
+    ];
+  }
+
+  return [
+    { label: "Power", value: node.powerLevel || 0 },
+    { label: "Influence", value: node.influenceScore || 0 },
+    { label: "Murders", value: node.murders || 0 },
+    { label: "Crimes", value: node.totalCrimes || node.crimesCommitted?.length || 0 },
+    { label: "Fear", value: node.fearFactor || 0 },
+    { label: "Money", value: `$${Number(node.money || 0).toLocaleString("en-US")}` }
+  ];
+}
+
+export function App() {
+  const [user, setUser] = useState(() => getStoredUser());
+  const [token, setToken] = useState(() => localStorage.getItem("bh_token"));
+  const [currentPage, setCurrentPage] = useState("networks");
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem("bh_sidebar_open") !== "false");
+
+  const { dashboard, analytics, simulation, loading, error, actions } = useDashboardData(token);
+
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem("bh_user", JSON.stringify(user));
+    }
+  }, [user]);
+
+  useEffect(() => {
+    localStorage.setItem("bh_sidebar_open", sidebarOpen ? "true" : "false");
+  }, [sidebarOpen]);
+
+  useEffect(() => {
+    if (!token) {
+      return undefined;
+    }
+
+    let isMounted = true;
+
+    api
+      .getCurrentUser(token)
+      .then((profile) => {
+        if (isMounted) {
+          setUser(normalizeUserProfile(profile));
+        }
+      })
+      .catch((profileError) => {
+        console.error("Failed to hydrate user profile", profileError);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [token]);
+
+  const operatorProfile = useMemo(() => normalizeUserProfile(user), [user]);
+  const messages = useMemo(
+    () => buildMessages(analytics, dashboard?.events, mockMessages),
+    [analytics, dashboard?.events]
+  );
+
+  if (!user || !token) {
+    return html`
+      <${AuthScreen}
+        onLogin=${(nextUser, nextToken) => {
+          setUser(normalizeUserProfile(nextUser));
+          setToken(nextToken);
+        }}
+      />
+    `;
+  }
+
   if (loading) {
     return html`
       <div className="min-h-screen bg-black flex items-center justify-center">
         <div className="text-center">
+          <div className="mx-auto mb-4 flex justify-center text-blood">
+            <${Icons.triangle} className="h-10 w-10" />
+          </div>
           <p className="font-display text-5xl uppercase tracking-[0.16em] text-blood">Loading</p>
           <p className="mt-3 text-sm uppercase tracking-[0.2em] text-white/50">Synchronizing the city</p>
         </div>
       </div>
     `;
   }
-
-  const people = dashboard?.people || [];
 
   function handleLogout() {
     localStorage.removeItem("bh_token");
@@ -46,30 +142,57 @@ export function App() {
     setToken(null);
   }
 
+  async function handleProfileSave(profilePatch) {
+    const updatedProfile = normalizeUserProfile(await api.updateCurrentUser(profilePatch, token));
+    setUser(updatedProfile);
+    return updatedProfile;
+  }
+
+  async function handleCulpritGuess(suspectId) {
+    const result = await api.guessCulprit(suspectId, token);
+    setUser(normalizeUserProfile({ ...user, ...result.user }));
+    await actions.refresh();
+    return result;
+  }
+
   return html`
     <div className="min-h-screen bg-black text-white flex">
       <${Sidebar}
         currentPage=${currentPage}
         onNavigate=${setCurrentPage}
-        userProfile=${user}
+        userProfile=${operatorProfile}
         onLogout=${handleLogout}
+        isOpen=${sidebarOpen}
+        onToggle=${() => setSidebarOpen((value) => !value)}
       />
 
       <main className="flex-1 p-6">
-        <header className="mb-8 flex items-center justify-between border-b border-white/10 pb-6">
-          <div>
-            <h1 className="font-display text-3xl uppercase tracking-widest text-blood">Black Horizon</h1>
-            <p className="text-xs uppercase tracking-widest text-white/40 mt-1">Intelligence Unit</p>
+        <header className="mb-8 flex items-center justify-between gap-4 border-b border-white/10 pb-6">
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick=${() => setSidebarOpen((value) => !value)}
+              className="rounded-full border border-white/10 bg-white/5 p-3 text-blood transition hover:border-blood/40 hover:bg-blood/10"
+              aria-label=${sidebarOpen ? "Close sidebar" : "Open sidebar"}
+            >
+              <${Icons.triangle} direction=${sidebarOpen ? "left" : "right"} className="h-5 w-5" />
+            </button>
+            <div>
+              <h1 className="font-display text-3xl uppercase tracking-[0.18em] text-blood">NOCTURNE</h1>
+              <p className="text-xs uppercase tracking-widest text-white/40 mt-1">Local simulation engine</p>
+            </div>
           </div>
           <div className="text-right">
             <p className="text-xs uppercase tracking-widest text-white/40">Operator</p>
-            <p className="font-display text-xl uppercase tracking-widest">J. Marlowe</p>
+            <p className="font-display text-xl uppercase tracking-widest">${operatorProfile?.operatorName}</p>
+            <p className="text-xs uppercase tracking-[0.22em] text-white/40 mt-1">${operatorProfile?.title}</p>
           </div>
         </header>
 
         ${error && html`<div className="bg-blood/20 border border-blood/30 p-4 rounded mb-6 text-blood">${error}</div>`}
 
-        ${currentPage === "networks" && html`
+        ${currentPage === "networks" &&
+        html`
           <${NetworksPage}
             dashboard=${dashboard}
             analytics=${analytics}
@@ -80,33 +203,17 @@ export function App() {
           />
         `}
 
-        ${currentPage === "pressure-map" && html`
-          <${PressureMapPage} analytics=${analytics} dashboard=${dashboard} />
-        `}
-
-        ${currentPage === "unstable-hierarchies" && html`
-          <${HierarchiesPage}
-            dashboard=${dashboard}
-            analytics=${analytics}
-            selectedNode=${selectedNode}
-            setSelectedNode=${setSelectedNode}
-          />
-        `}
-
-        ${currentPage === "crime-records" && html`
-          <${CrimeRecordsPage} dashboard=${dashboard} />
-        `}
-
-        ${currentPage === "messages" && html`
-          <${MessagesPage} messages=${mockMessages} />
-        `}
-
-        ${currentPage === "user-details" && html`
+        ${currentPage === "crime-records" && html`<${CrimeRecordsPage} dashboard=${dashboard} />`}
+        ${currentPage === "messages" && html`<${MessagesPage} messages=${messages} />`}
+        ${currentPage === "user-details" &&
+        html`
           <${UserDetailsPage}
-            userProfile=${mockUserProfile}
+            userProfile=${operatorProfile}
             selectedNode=${selectedNode}
             simulation=${simulation}
-            actions=${actions}
+            onSave=${handleProfileSave}
+            dashboard=${dashboard}
+            onGuessCulprit=${handleCulpritGuess}
           />
         `}
       </main>
@@ -116,28 +223,67 @@ export function App() {
 
 function NetworksPage({ dashboard, analytics, simulation, selectedNode, setSelectedNode, actions }) {
   const [view, setView] = useState("criminal");
-  const [trackingEnabled, setTrackingEnabled] = useState(Boolean(simulation?.isRunning));
-
-  useEffect(() => {
-    setTrackingEnabled(Boolean(simulation?.isRunning));
-  }, [simulation?.isRunning]);
-
+  const [isUpdatingSimulation, setIsUpdatingSimulation] = useState(false);
   const graph = useMemo(() => getGraphForView(dashboard, view), [dashboard, view]);
 
-  // Get stats based on view
-  const criminals = dashboard?.people?.filter(p => p.role === "criminal") || [];
-  const police = dashboard?.people?.filter(p => p.role === "police") || [];
+  const criminals = dashboard?.people?.filter((person) => person.role === "criminal") || [];
+  const police = dashboard?.people?.filter((person) => person.role === "police") || [];
   const viewNodes = view === "police" ? police : criminals;
-  const corruptionLinks = graph?.links?.filter(l => l.type === "corruption") || [];
-  const rivalryLinks = graph?.links?.filter(l => l.type === "rivalry") || [];
+  const rivalryLinks = graph?.links?.filter((link) => link.type === "rivalry") || [];
+  const events = dashboard?.events || [];
+  const selectedStats = statForNode(selectedNode);
+  const viewTitle = view === "police" ? "Police Network" : view === "corruption" ? "Corruption Network" : "Criminal Network";
 
-  const viewTitle = view === "police" ? "Police Network" : view === "hierarchy" ? "Power Hierarchy" : "Criminal Network";
+  async function handleSimulationToggle() {
+    setIsUpdatingSimulation(true);
+    try {
+      await actions.toggleSimulation(!simulation?.isRunning);
+    } finally {
+      setIsUpdatingSimulation(false);
+    }
+  }
+
+  async function handleManualTick() {
+    setIsUpdatingSimulation(true);
+    try {
+      await actions.runSimulationTick("operator-panel");
+    } finally {
+      setIsUpdatingSimulation(false);
+    }
+  }
 
   return html`
     <div>
-      <h2 className="font-display text-3xl uppercase tracking-widest mb-6">${viewTitle}</h2>
-       
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="flex items-end justify-between gap-4 mb-6">
+        <div>
+          <h2 className="font-display text-3xl uppercase tracking-widest">${viewTitle}</h2>
+          <p className="text-sm text-white/45 mt-2">The city AI ticks every ${Math.round((simulation?.intervalMs || 40000) / 1000)} seconds, opens cases, solves them, creates operators, kills them, and logs every move in the feed.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick=${handleSimulationToggle}
+            disabled=${isUpdatingSimulation}
+            className=${`rounded-full border px-4 py-2 text-xs uppercase tracking-[0.24em] transition ${
+              simulation?.isRunning
+                ? "border-blood/40 bg-blood/10 text-blood"
+                : "border-white/15 bg-white/5 text-white/70"
+            } disabled:opacity-60`}
+          >
+            ${simulation?.isRunning ? "Pause AI" : "Resume AI"}
+          </button>
+          <button
+            type="button"
+            onClick=${handleManualTick}
+            disabled=${isUpdatingSimulation}
+            className="rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.24em] text-white/80 transition hover:border-blood/40 hover:text-blood disabled:opacity-60"
+          >
+            Force Tick
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
         <div className="bg-white/5 p-4 rounded">
           <p className="text-xs uppercase tracking-widest text-white/50">${view === "police" ? "Officers" : "Members"}</p>
           <p className="font-display text-3xl">${viewNodes.length}</p>
@@ -148,140 +294,116 @@ function NetworksPage({ dashboard, analytics, simulation, selectedNode, setSelec
         </div>
         <div className="bg-white/5 p-4 rounded">
           <p className="text-xs uppercase tracking-widest text-white/50">${view === "police" ? "Corrupt" : "High Value"}</p>
-          <p className="font-display text-3xl text-blood">${view === "police" ? police.filter(p => p.isCorrupt).length : criminals.filter(p => (p.dominanceScore || 0) >= 420).length}</p>
+          <p className="font-display text-3xl text-blood">${view === "police" ? police.filter((person) => person.isCorrupt).length : criminals.filter((person) => (person.dominanceScore || 0) >= 420).length}</p>
         </div>
         <div className="bg-white/5 p-4 rounded">
-          <p className="text-xs uppercase tracking-widest text-white/50">${view === "police" ? "Clean" : "Conflicts"}</p>
-          <p className="font-display text-3xl text-blood">${view === "police" ? police.filter(p => !p.isCorrupt).length : rivalryLinks.length}</p>
+          <p className="text-xs uppercase tracking-widest text-white/50">Last Tick</p>
+          <p className="font-display text-xl text-blood">${formatTime(simulation?.lastTickAt)}</p>
+          <p className="mt-2 text-xs uppercase tracking-widest text-white/40">${simulation?.isRunning ? "AI active" : "AI paused"}</p>
         </div>
       </div>
 
-      <div className="mb-4 flex gap-2">
-        ${viewOptions.map((opt) => html`
+      <div className="mb-4 flex flex-wrap gap-2">
+        ${viewOptions.map((option) => html`
           <button
-            key=${opt.key}
+            key=${option.key}
             type="button"
-            onClick=${() => setView(opt.key)}
+            onClick=${() => setView(option.key)}
             className=${`px-4 py-2 rounded text-sm uppercase ${
-              view === opt.key ? "bg-blood text-white" : "bg-white/10 text-white/70 hover:bg-white/20"
+              view === option.key ? "bg-blood text-white" : "bg-white/10 text-white/70 hover:bg-white/20"
             }`}
           >
-            ${opt.label}
+            ${option.label}
           </button>
         `)}
       </div>
 
-      <div className="bg-white/5 p-4 rounded mb-6" style=${{ minHeight: "400px" }}>
-        ${view === "hierarchy"
-          ? html`<${HierarchyGraph} root=${dashboard?.views?.hierarchy} onSelectNode=${setSelectedNode} />`
-          : html`<${NetworkGraph} graph=${graph} mode=${view} selectedNode=${selectedNode} onSelectNode=${setSelectedNode} />`
-        }
+      <div className="bg-white/5 p-4 rounded mb-6" style=${{ minHeight: "420px" }}>
+        <${NetworkGraph} graph=${graph} mode=${view} selectedNode=${selectedNode} onSelectNode=${setSelectedNode} />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid gap-4 lg:grid-cols-3">
         <div className="bg-white/5 p-4 rounded">
-          <h3 className="font-bold uppercase tracking-widest mb-3 text-blood">${view === "police" ? "Corrupt Officers" : "Top operatives"}</h3>
-          ${view === "police" 
-            ? (analytics?.suspiciousPolice || []).map((officer, i) => html`
-              <div key=${officer._id || i} className="border-t border-white/10 py-2">
-                <p className="font-bold">${officer.name}</p>
-                <p className="text-sm text-white/50">${officer.rank} - Suspicion: ${Math.round((officer.suspiciousIndex || 0) * 100)}%</p>
-              </div>
-            `)
-            : viewNodes.slice(0, 5).map((p, i) => html`
-              <div key=${p._id || i} className="border-t border-white/10 py-2">
-                <p className="font-bold">${p.name}</p>
-                <p className="text-sm text-white/50">${p.rank || p.role} - Power: ${p.powerLevel || 0}</p>
-              </div>
-            `)
-          }
-        </div>
-
-        <div className="bg-white/5 p-4 rounded">
-          <h3 className="font-bold uppercase tracking-widest mb-3 text-blood">${view === "police" ? "Clean Officers" : "Rivalries"}</h3>
+          <h3 className="font-bold uppercase tracking-widest mb-3 text-blood">${view === "police" ? "Corrupt Officers" : "Top Operatives"}</h3>
           ${view === "police"
-            ? police.filter(p => !p.isCorrupt).slice(0, 5).map((p, i) => html`
-              <div key=${p._id || i} className="border-t border-white/10 py-2">
-                <p className="font-bold">${p.name}</p>
-                <p className="text-sm text-white/50">${p.rank} - Integrity: ${p.integrityScore || 0}</p>
-              </div>
-            `)
-            : rivalryLinks.slice(0, 5).map((l, i) => html`
-              <div key=${l._id || i} className="border-t border-white/10 py-2">
-                <p className="font-bold text-blood">Tension: ${l.tensionScore || 0}</p>
-                <p className="text-sm text-white/50">High risk conflict</p>
-              </div>
-            `)
-          }
+            ? (analytics?.suspiciousPolice || []).map((officer, index) => html`
+                <div key=${officer._id || index} className="border-t border-white/10 py-3">
+                  <p className="font-bold">${officer.name}</p>
+                  <p className="text-sm text-white/50">${officer.rank} - Suspicion ${Math.round((officer.suspiciousIndex || 0) * 100)}%</p>
+                </div>
+              `)
+            : viewNodes.slice(0, 5).map((person, index) => html`
+                <div key=${person._id || index} className="border-t border-white/10 py-3">
+                  <p className="font-bold">${person.name}</p>
+                  <p className="text-sm text-white/50">${person.rank || person.role} - Power ${person.powerLevel || 0}</p>
+                </div>
+              `)}
         </div>
+
+        <div className="bg-white/5 p-4 rounded">
+          <h3 className="font-bold uppercase tracking-widest mb-3 text-blood">${selectedNode ? "Selected Node" : view === "police" ? "Clean Officers" : "Conflict Board"}</h3>
+          ${selectedNode
+            ? html`
+                <div>
+                  <p className="font-display text-xl uppercase">${selectedNode.name}</p>
+                  <p className="text-white/50">${selectedNode.rank || selectedNode.role} - ${selectedNode.faction || "Independent"}</p>
+                  <div className="grid grid-cols-2 gap-3 mt-4">
+                    ${selectedStats.map((item) => html`
+                      <div key=${item.label} className="rounded-xl border border-white/10 bg-black/25 px-3 py-2">
+                        <p className="text-[10px] uppercase tracking-[0.24em] text-white/35">${item.label}</p>
+                        <p className="mt-1 text-sm font-semibold text-white">${item.value}</p>
+                      </div>
+                    `)}
+                  </div>
+                </div>
+              `
+            : view === "police"
+              ? police.filter((person) => !person.isCorrupt).slice(0, 5).map((person, index) => html`
+                  <div key=${person._id || index} className="border-t border-white/10 py-3">
+                    <p className="font-bold">${person.name}</p>
+                    <p className="text-sm text-white/50">${person.rank} - Integrity ${person.integrityScore || 0}</p>
+                  </div>
+                `)
+              : rivalryLinks.slice(0, 5).map((link, index) => html`
+                  <div key=${link._id || index} className="border-t border-white/10 py-3">
+                    <p className="font-bold text-blood">Tension ${link.tensionScore || 0}</p>
+                    <p className="text-sm text-white/50">A rivalry edge is heating up inside the network.</p>
+                  </div>
+                `)}
+          ${!selectedNode && html`<p className="mt-4 text-sm text-white/45">Hover a node to inspect its live stats or click one to pin it here.</p>`}
+        </div>
+
+        <${WorldEventsPanel} events=${events} simulation=${simulation} />
       </div>
     </div>
   `;
 }
 
-function PressureMapPage({ analytics, dashboard }) {
-  const pressureEntries = Object.entries(analytics?.crimePressure || {}).sort((a, b) => b[1] - a[1]);
-
+function WorldEventsPanel({ events, simulation }) {
   return html`
-    <div>
-      <h2 className="font-display text-3xl uppercase tracking-widest mb-6">Pressure Map</h2>
-      
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        ${pressureEntries.map(([district, value], i) => html`
-          <div key=${district} className=${`p-4 rounded ${i === 0 ? "bg-blood/20 border border-blood/30" : "bg-white/5 border border-white/10"}`}>
-            <p className="text-xs uppercase tracking-widest text-white/50">${district}</p>
-            <p className="font-display text-3xl">${value}</p>
-          </div>
-        `)}
+    <section className="bg-white/5 p-4 rounded">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <h3 className="font-bold uppercase tracking-widest text-blood">World Feed</h3>
+        <span className="text-[11px] uppercase tracking-[0.24em] text-white/40">
+          ${simulation?.isRunning ? "Live AI feed" : "Feed paused"}
+        </span>
       </div>
 
-      <div className="bg-white/5 p-4 rounded">
-        <h3 className="font-bold uppercase tracking-widest mb-3 text-blood">Corruption Clusters</h3>
-        ${(analytics?.corruptionClusters || []).length === 0 
-          ? html`<p className="text-white/50">No corruption clusters detected.</p>`
-          : (analytics?.corruptionClusters || []).map((c, i) => html`
-            <div key=${c.sourceId || i} className="border-t border-white/10 py-2 flex justify-between">
-              <span>Node connection</span>
-              <span className="text-blood">Tension: ${c.tensionScore}</span>
-            </div>
-          `)
-        }
+      <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+        ${(events || []).length === 0
+          ? html`<p className="text-sm text-white/45">The city is quiet for now.</p>`
+          : events.map((event) => html`
+              <article key=${event._id || `${event.headline}-${event.happenedAt}`} className=${`rounded-2xl border p-4 ${event.metadata?.culpritClue ? "border-blood/35 bg-blood/10" : "border-white/10 bg-black/30"}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">${formatTime(event.happenedAt)}</p>
+                  ${event.metadata?.culpritClue && html`<span className="rounded-full bg-blood/20 px-2 py-1 text-[10px] uppercase tracking-[0.22em] text-blood">Clue</span>`}
+                </div>
+                <p className="mt-2 font-display text-xl uppercase tracking-[0.12em] text-blood">${event.headline}</p>
+                <p className="mt-2 text-sm leading-6 text-white/70">${event.summary}</p>
+              </article>
+            `)}
       </div>
-    </div>
-  `;
-}
-
-function HierarchiesPage({ dashboard, analytics, selectedNode, setSelectedNode }) {
-  return html`
-    <div>
-      <h2 className="font-display text-3xl uppercase tracking-widest mb-6">Unstable Hierarchies</h2>
-      
-      <div className="bg-white/5 p-4 rounded mb-6" style=${{ minHeight: "300px" }}>
-        <${HierarchyGraph} root=${dashboard?.views?.hierarchy} onSelectNode=${setSelectedNode} />
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-white/5 p-4 rounded">
-          <h3 className="font-bold uppercase tracking-widest mb-3 text-blood">Instability Scores</h3>
-          ${(analytics?.unstableHierarchies || []).map((entry, i) => html`
-            <div key=${entry.faction || i} className="border-t border-white/10 py-2 flex justify-between">
-              <span>${entry.faction}</span>
-              <span className="text-blood">${clampPercent(entry.instabilityScore)}%</span>
-            </div>
-          `)}
-        </div>
-
-        <div className="bg-white/5 p-4 rounded">
-          <h3 className="font-bold uppercase tracking-widest mb-3 text-blood">Selected Node</h3>
-          ${selectedNode ? html`
-            <div>
-              <p className="font-bold">${selectedNode.name}</p>
-              <p className="text-white/50">${selectedNode.rank || selectedNode.role} - ${selectedNode.faction || "Independent"}</p>
-            </div>
-          ` : html`<p className="text-white/50">Select a node from the hierarchy.</p>`}
-        </div>
-      </div>
-    </div>
+    </section>
   `;
 }
 
@@ -291,33 +413,35 @@ function CrimeRecordsPage({ dashboard }) {
   return html`
     <div>
       <h2 className="font-display text-3xl uppercase tracking-widest mb-6">Crime Records</h2>
-      
-      <div className="grid grid-cols-3 gap-4 mb-6">
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-white/5 p-4 rounded">
           <p className="text-xs uppercase tracking-widest text-white/50">Total</p>
           <p className="font-display text-3xl">${crimes.length}</p>
         </div>
         <div className="bg-white/5 p-4 rounded">
           <p className="text-xs uppercase tracking-widest text-white/50">Solved</p>
-          <p className="font-display text-3xl">${crimes.filter(c => c.status === "solved").length}</p>
+          <p className="font-display text-3xl">${crimes.filter((crime) => crime.status === "solved").length}</p>
         </div>
         <div className="bg-white/5 p-4 rounded">
           <p className="text-xs uppercase tracking-widest text-white/50">Open</p>
-          <p className="font-display text-3xl text-blood">${crimes.filter(c => c.status === "open").length}</p>
+          <p className="font-display text-3xl text-blood">${crimes.filter((crime) => crime.status === "open").length}</p>
         </div>
       </div>
 
       <div className="bg-white/5 p-4 rounded">
         ${crimes.map((crime) => html`
           <div key=${crime._id || crime.crimeId} className="border-t border-white/10 py-3">
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-3">
               <div>
                 <p className="font-bold uppercase">${crime.crimeId}</p>
                 <p>${crime.title}</p>
               </div>
               <span className=${`px-2 py-1 rounded text-xs uppercase ${
                 crime.status === "solved" ? "bg-green-500/20 text-green-400" : "bg-blood/20 text-blood"
-              }`}>${crime.status}</span>
+              }`}>
+                ${crime.status}
+              </span>
             </div>
             <p className="text-sm text-white/50 mt-1">${crime.summary}</p>
           </div>
@@ -330,21 +454,30 @@ function CrimeRecordsPage({ dashboard }) {
 function MessagesPage({ messages }) {
   return html`
     <div>
-      <h2 className="font-display text-3xl uppercase tracking-widest mb-6">Messages</h2>
-      
+      <h2 className="font-display text-3xl uppercase tracking-widest mb-6">AI Feed</h2>
+
       <div className="bg-white/5 p-4 rounded">
-        ${messages.map((msg) => html`
-          <div key=${msg.id || msg.subject} className="border-t border-white/10 py-3">
-            <div className="flex justify-between">
+        ${messages.map((message) => html`
+          <div key=${message.id || message.subject} className="border-t border-white/10 py-3">
+            <div className="flex justify-between gap-4">
               <div>
-                <p className="text-xs uppercase tracking-widest text-white/50">${msg.sender}</p>
-                <p className="font-bold mt-1">${msg.subject}</p>
+                <p className="text-xs uppercase tracking-widest text-white/50">${message.sender}</p>
+                <p className="font-bold mt-1">${message.subject}</p>
               </div>
-              <span className=${`px-2 py-1 rounded text-xs uppercase ${
-                msg.priority === "high" ? "bg-blood/20 text-blood" : msg.priority === "medium" ? "bg-yellow-500/20 text-yellow-400" : "bg-white/10 text-white/50"
-              }`}>${msg.priority}</span>
+              <div className="text-right">
+                <span className=${`px-2 py-1 rounded text-xs uppercase ${
+                  message.priority === "high"
+                    ? "bg-blood/20 text-blood"
+                    : message.priority === "medium"
+                      ? "bg-yellow-500/20 text-yellow-400"
+                      : "bg-white/10 text-white/50"
+                }`}>
+                  ${message.priority}
+                </span>
+                <p className="mt-2 text-[11px] uppercase tracking-[0.24em] text-white/35">${formatTime(message.timestamp)}</p>
+              </div>
             </div>
-            <p className="text-sm text-white/50 mt-2">${msg.body}</p>
+            <p className="text-sm text-white/50 mt-2">${message.body}</p>
           </div>
         `)}
       </div>
@@ -352,40 +485,250 @@ function MessagesPage({ messages }) {
   `;
 }
 
-function UserDetailsPage({ userProfile, selectedNode, simulation, actions }) {
+function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashboard, onGuessCulprit }) {
+  const [formState, setFormState] = useState(() => ({
+    operatorName: userProfile?.operatorName || userProfile?.username || "",
+    email: userProfile?.email || "",
+    title: userProfile?.title || "Field Analyst",
+    division: userProfile?.division || "Intelligence Unit"
+  }));
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [suspectId, setSuspectId] = useState("");
+  const [guessMessage, setGuessMessage] = useState("");
+  const [guessError, setGuessError] = useState("");
+  const [isGuessing, setIsGuessing] = useState(false);
+  const suspects = (dashboard?.people || []).filter((person) => person.role === "criminal");
+
+  useEffect(() => {
+    setFormState({
+      operatorName: userProfile?.operatorName || userProfile?.username || "",
+      email: userProfile?.email || "",
+      title: userProfile?.title || "Field Analyst",
+      division: userProfile?.division || "Intelligence Unit"
+    });
+  }, [userProfile]);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setIsSaving(true);
+    setSaveMessage("");
+    setSaveError("");
+
+    try {
+      await onSave(formState);
+      setSaveMessage("Operator details updated.");
+    } catch (formError) {
+      setSaveError(formError.message || "Unable to save operator details.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleGuessSubmit(event) {
+    event.preventDefault();
+    if (!suspectId) {
+      setGuessError("Choose a suspect first.");
+      return;
+    }
+
+    setIsGuessing(true);
+    setGuessError("");
+    setGuessMessage("");
+
+    try {
+      const result = await onGuessCulprit(suspectId);
+      setGuessMessage(result.message);
+      if (result.correct || result.user?.culpritGame?.attemptsRemaining === 0) {
+        setSuspectId("");
+      }
+    } catch (guessRequestError) {
+      setGuessError(guessRequestError.message || "Guess failed.");
+    } finally {
+      setIsGuessing(false);
+    }
+  }
+
   return html`
     <div>
       <h2 className="font-display text-3xl uppercase tracking-widest mb-6">User Details</h2>
-      
-      <div className="grid grid-cols-2 gap-6">
-        <div className="bg-white/5 p-4 rounded">
-          <h3 className="font-bold uppercase tracking-widest mb-3 text-blood">Operator Profile</h3>
-          <div className="flex items-center gap-4">
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <form onSubmit=${handleSubmit} className="bg-white/5 p-5 rounded">
+          <div className="flex items-center gap-4 mb-6">
             <div className="w-16 h-16 rounded-full bg-blood/30 flex items-center justify-center text-2xl font-bold">
-              ${(userProfile?.name || "JM").split(" ").map(p => p[0]).join("").slice(0,2)}
+              ${(formState.operatorName || userProfile?.username || "OP")
+                .split(" ")
+                .map((part) => part[0])
+                .join("")
+                .slice(0, 2)
+                .toUpperCase()}
             </div>
             <div>
-              <p className="font-display text-2xl uppercase">${userProfile?.name || "J. Marlowe"}</p>
-              <p className="text-white/50 uppercase text-sm">${userProfile?.role || "Field Analyst"}</p>
-              <p className="text-white/50 text-sm mt-1">${userProfile?.division || "Intelligence Unit"}</p>
+              <p className="font-display text-2xl uppercase">${formState.operatorName || userProfile?.username}</p>
+              <p className="text-white/50 uppercase text-sm">${formState.title}</p>
+              <p className="text-white/50 text-sm mt-1">${formState.division}</p>
             </div>
           </div>
-        </div>
 
-        <div className="bg-white/5 p-4 rounded">
-          <h3 className="font-bold uppercase tracking-widest mb-3 text-blood">Selected Node</h3>
-          ${selectedNode ? html`
-            <div>
-              <p className="font-display text-xl uppercase">${selectedNode.name}</p>
-              <p className="text-white/50">${selectedNode.rank || selectedNode.role} - ${selectedNode.faction || "Independent"}</p>
-              <div className="grid grid-cols-4 gap-2 mt-4">
-                <div className="text-center"><p className="text-xs text-white/50">DOM</p><p className="font-bold text-blood">${Math.round(selectedNode.dominanceScore || 0)}</p></div>
-                <div className="text-center"><p className="text-xs text-white/50">PWR</p><p className="font-bold">${selectedNode.powerLevel || 0}</p></div>
-                <div className="text-center"><p className="text-xs text-white/50">FER</p><p className="font-bold">${selectedNode.fearFactor || 0}</p></div>
-                <div className="text-center"><p className="text-xs text-white/50">LOY</p><p className="font-bold">${selectedNode.loyaltyScore || 0}</p></div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="block">
+              <span className="block text-xs uppercase tracking-widest text-white/50 mb-2">Username</span>
+              <input
+                type="text"
+                value=${userProfile?.username || ""}
+                disabled=${true}
+                className="w-full rounded border border-white/10 bg-white/5 px-4 py-3 text-white/45 outline-none"
+              />
+            </label>
+
+            <label className="block">
+              <span className="block text-xs uppercase tracking-widest text-white/50 mb-2">Operator Name</span>
+              <input
+                type="text"
+                value=${formState.operatorName}
+                onChange=${(event) => setFormState((current) => ({ ...current, operatorName: event.target.value }))}
+                className="w-full rounded border border-white/10 bg-black/30 px-4 py-3 text-white outline-none transition focus:border-blood/50"
+                placeholder=${userProfile?.username || "Operator"}
+              />
+            </label>
+
+            <label className="block">
+              <span className="block text-xs uppercase tracking-widest text-white/50 mb-2">Email</span>
+              <input
+                type="email"
+                value=${formState.email}
+                onChange=${(event) => setFormState((current) => ({ ...current, email: event.target.value }))}
+                className="w-full rounded border border-white/10 bg-black/30 px-4 py-3 text-white outline-none transition focus:border-blood/50"
+              />
+            </label>
+
+            <label className="block">
+              <span className="block text-xs uppercase tracking-widest text-white/50 mb-2">Title</span>
+              <input
+                type="text"
+                value=${formState.title}
+                onChange=${(event) => setFormState((current) => ({ ...current, title: event.target.value }))}
+                className="w-full rounded border border-white/10 bg-black/30 px-4 py-3 text-white outline-none transition focus:border-blood/50"
+              />
+            </label>
+
+            <label className="block md:col-span-2">
+              <span className="block text-xs uppercase tracking-widest text-white/50 mb-2">Division</span>
+              <input
+                type="text"
+                value=${formState.division}
+                onChange=${(event) => setFormState((current) => ({ ...current, division: event.target.value }))}
+                className="w-full rounded border border-white/10 bg-black/30 px-4 py-3 text-white outline-none transition focus:border-blood/50"
+              />
+            </label>
+          </div>
+
+          ${saveError && html`<p className="mt-4 rounded border border-blood/30 bg-blood/10 px-4 py-3 text-sm text-blood">${saveError}</p>`}
+          ${saveMessage && html`<p className="mt-4 rounded border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-300">${saveMessage}</p>`}
+
+          <div className="mt-5 flex items-center justify-between gap-4">
+            <p className="text-xs uppercase tracking-[0.22em] text-white/35">Operator name defaults to your username until you change it.</p>
+            <button
+              type="submit"
+              disabled=${isSaving}
+              className="rounded-full bg-blood px-5 py-3 text-sm uppercase tracking-[0.22em] text-white transition hover:bg-blood/85 disabled:opacity-60"
+            >
+              ${isSaving ? "Saving" : "Save Details"}
+            </button>
+          </div>
+        </form>
+
+        <div className="space-y-6">
+          <div className="bg-white/5 p-5 rounded">
+            <h3 className="font-bold uppercase tracking-widest mb-4 text-blood">Operator Snapshot</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-widest text-white/50">Operator</p>
+                <p className="font-display text-2xl uppercase mt-2">${userProfile?.operatorName}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-widest text-white/50">Division</p>
+                <p className="font-display text-2xl uppercase mt-2">${userProfile?.division}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-widest text-white/50">AI Cycle</p>
+                <p className="font-display text-2xl uppercase mt-2">${Math.round((simulation?.intervalMs || 40000) / 1000)} Sec</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-widest text-white/50">Last Tick</p>
+                <p className="font-display text-2xl uppercase mt-2">${formatTime(simulation?.lastTickAt)}</p>
               </div>
             </div>
-          ` : html`<p className="text-white/50">Select a node from Networks.</p>`}
+          </div>
+
+          <div className="bg-white/5 p-5 rounded">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-bold uppercase tracking-widest text-blood">Culprit Guess</h3>
+              <span className="rounded-full border border-blood/30 bg-blood/10 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-blood">
+                ${userProfile?.culpritGame?.attemptsRemaining ?? 3} attempts left
+              </span>
+            </div>
+
+            <p className="mt-3 text-sm text-white/60">
+              Watch the clue cards in the AI feed, compare them with the network, and name the culprit before your three guesses run out.
+            </p>
+
+            <form onSubmit=${handleGuessSubmit} className="mt-4 space-y-4">
+              <label className="block">
+                <span className="block text-xs uppercase tracking-widest text-white/50 mb-2">Suspect</span>
+                <select
+                  value=${suspectId}
+                  onChange=${(event) => setSuspectId(event.target.value)}
+                  disabled=${isGuessing || userProfile?.culpritGame?.status !== "active"}
+                  className="w-full rounded border border-white/10 bg-black/30 px-4 py-3 text-white outline-none transition focus:border-blood/50 disabled:opacity-60"
+                >
+                  <option value="">Select criminal suspect</option>
+                  ${suspects.map((person) => html`<option key=${person._id} value=${person._id}>${person.name}</option>`)}
+                </select>
+              </label>
+
+              <button
+                type="submit"
+                disabled=${isGuessing || userProfile?.culpritGame?.status !== "active"}
+                className="rounded-full bg-blood px-5 py-3 text-sm uppercase tracking-[0.22em] text-white transition hover:bg-blood/85 disabled:opacity-60"
+              >
+                ${isGuessing ? "Checking" : "Guess Culprit"}
+              </button>
+            </form>
+
+            ${guessError && html`<p className="mt-4 rounded border border-blood/30 bg-blood/10 px-4 py-3 text-sm text-blood">${guessError}</p>`}
+            ${guessMessage && html`<p className="mt-4 rounded border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/80">${guessMessage}</p>`}
+            ${userProfile?.culpritGame?.status !== "active" &&
+            html`
+              <p className="mt-4 text-sm text-white/70">
+                ${userProfile?.culpritGame?.status === "solved"
+                  ? `Case solved. Culprit: ${userProfile?.culpritGame?.culpritRevealedName}.`
+                  : `Case locked. Culprit: ${userProfile?.culpritGame?.culpritRevealedName || "unknown"}.`}
+              </p>
+            `}
+          </div>
+
+          <div className="bg-white/5 p-5 rounded">
+            <h3 className="font-bold uppercase tracking-widest mb-4 text-blood">Selected Node</h3>
+            ${selectedNode
+              ? html`
+                  <div>
+                    <p className="font-display text-xl uppercase">${selectedNode.name}</p>
+                    <p className="text-white/50">${selectedNode.rank || selectedNode.role} - ${selectedNode.faction || "Independent"}</p>
+                    <div className="grid grid-cols-2 gap-3 mt-4">
+                      ${statForNode(selectedNode).map((item) => html`
+                        <div key=${item.label} className="rounded-xl border border-white/10 bg-black/25 px-3 py-2">
+                          <p className="text-[10px] uppercase tracking-[0.24em] text-white/35">${item.label}</p>
+                          <p className="mt-1 text-sm font-semibold text-white">${item.value}</p>
+                        </div>
+                      `)}
+                    </div>
+                  </div>
+                `
+              : html`<p className="text-white/50">Select a node from Networks.</p>`}
+          </div>
         </div>
       </div>
     </div>
