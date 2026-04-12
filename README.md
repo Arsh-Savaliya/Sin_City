@@ -1,7 +1,5 @@
-# Nocturne
-
-Nocturne is a Sin City themed crime-intelligence web app built for HackNite 2026.  
-It mixes a live criminal network, police corruption tracking, AI-generated world events, and a simple deduction game where the user must identify a hidden culprit from clues in the feed.
+Nocturne is a Sin City themed crime-intelligence web app. 
+It mixes a live criminal network, police corruption tracking, AI-generated world events, and a simple mystery game where the user must identify a hidden culprit from clues in the feed.
 
 ## Problem Statement
 
@@ -13,12 +11,6 @@ Nocturne turns that chaos into one readable interface where an operator can:
 - follow AI feed clues
 - solve the active culprit hunt before the three guesses run out
 
-## Why It Fits The Theme
-
-- Noir visual language with a Sin City atmosphere
-- Criminal empires, corrupt officers, rivalries, murders, and case files
-- Hidden culprit gameplay layered on top of a living underworld simulation
-
 ## Core Features
 
 - Authentication with per-user worlds
@@ -29,7 +21,7 @@ Nocturne turns that chaos into one readable interface where an operator can:
 - 40-second autonomous AI tick plus manual force tick
 - Responsive dashboard built for desktop and mobile
 
-## Tech Stack
+## Stack Used
 
 - Frontend: React via browser modules + TailwindCSS
 - Backend: Node.js + Express
@@ -109,24 +101,8 @@ PORT=5000
 - `POST /api/dashboard/culprit/guess`
 - `POST /api/dashboard/culprit/restart`
 
-## Judge Demo Flow
-
-1. Log in as an operator.
-2. Open the network and show live criminal/police relationships.
-3. Show the AI feed generating clues and world events.
-4. Open `User Details` and make a culprit guess.
-5. Force a tick to show the world update instantly.
-
 ## Deployment Notes
 
 - Frontend + backend can be served together from the Express app.
 - Recommended hosting: Render for the app and MongoDB Atlas for the database.
 - Keep secrets in environment variables only.
-
-## What Makes This Submission Strong
-
-- Clear Sin City theme fit
-- Full frontend-backend-database-auth flow
-- Simple but interesting gameplay loop
-- Clean, modular project structure
-- Easy to demo in a short judging window

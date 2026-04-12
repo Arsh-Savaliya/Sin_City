@@ -226,6 +226,20 @@ function NetworksPage({ dashboard, analytics, simulation, selectedNode, setSelec
   const events = dashboard?.events || [];
   const selectedStats = statForNode(selectedNode);
   const viewTitle = view === "police" ? "Police Network" : view === "corruption" ? "Corruption Network" : "Criminal Network";
+  const briefCards = [
+    {
+      label: "Problem",
+      text: "Operators need a fast way to understand shifting crime networks instead of reading raw case files."
+    },
+    {
+      label: "What Nocturne Does",
+      text: "It turns a Sin City underworld into a live, playable intelligence board with clues, cases, and character movement."
+    },
+    {
+      label: "Why It Plays Well",
+      text: "The user tracks the AI feed, compares it with the network, and gets three shots to identify the hidden culprit."
+    }
+  ];
 
   async function handleSimulationToggle() {
     setIsUpdatingSimulation(true);
@@ -274,6 +288,15 @@ function NetworksPage({ dashboard, analytics, simulation, selectedNode, setSelec
             Force Tick
           </button>
         </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3 mb-6">
+        ${briefCards.map((card) => html`
+          <section key=${card.label} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <p className="text-[11px] uppercase tracking-[0.24em] text-blood">${card.label}</p>
+            <p className="mt-3 text-sm leading-6 text-white/72">${card.text}</p>
+          </section>
+        `)}
       </div>
 
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
