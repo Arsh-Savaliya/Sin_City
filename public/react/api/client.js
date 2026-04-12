@@ -1,5 +1,5 @@
 function authHeaders(token) {
-  return token ? { 
+  return token ? {
     "Content-Type": "application/json",
     "Authorization": `Bearer ${token}`
   } : { "Content-Type": "application/json" };
@@ -38,42 +38,42 @@ export const api = {
     request("/api/dashboard/culprit/restart", {
       method: "POST"
     }, token),
-  
+
   updatePersonStatus: (id, status, token) =>
     request(`/api/people/${id}`, {
       method: "PATCH",
       body: JSON.stringify({ status })
     }, token),
-    
+
   createCrime: (payload, token) =>
     request("/api/crimes", {
       method: "POST",
       body: JSON.stringify(payload)
     }, token),
-    
+
   updateCrime: (id, payload, token) =>
     request(`/api/crimes/${id}`, {
       method: "PATCH",
       body: JSON.stringify(payload)
     }, token),
-    
+
   toggleSimulation: (isRunning, token) =>
     request("/api/dashboard/simulation/toggle", {
       method: "POST",
       body: JSON.stringify({ isRunning })
     }, token),
-    
+
   runSimulationTick: (reason = "manual-ui", token) =>
     request("/api/dashboard/simulation/tick", {
       method: "POST",
       body: JSON.stringify({ reason })
     }, token),
-    
+
   promoteCharacter: (id, token) =>
     request(`/api/dashboard/characters/${id}/promote`, {
       method: "POST"
     }, token),
-    
+
   eliminateCharacter: (id, token) =>
     request(`/api/dashboard/characters/${id}/eliminate`, {
       method: "POST"

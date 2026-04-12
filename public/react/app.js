@@ -1,4 +1,4 @@
-import { React, html } from "./lib/html.js";
+﻿import { React, html } from "./lib/html.js";
 import { api } from "./api/client.js";
 import { useDashboardData } from "./hooks/useDashboardData.js";
 import { NetworkGraph } from "./components/graphs/NetworkGraph.js";
@@ -9,6 +9,8 @@ import { getGraphForView, viewOptions, buildMessages, formatTime } from "./utils
 import { mockMessages } from "./data/mockData.js";
 
 const { useEffect, useMemo, useState } = React;
+const LEGACY_AUTH_KEYS = ["bh_token", "bh_user"];
+const DEFAULT_SIMULATION_INTERVAL = 40000;
 
 function normalizeUserProfile(user) {
   if (!user) {
@@ -59,8 +61,7 @@ export function App() {
   const { dashboard, analytics, simulation, loading, error, actions } = useDashboardData(token);
 
   useEffect(() => {
-    localStorage.removeItem("bh_token");
-    localStorage.removeItem("bh_user");
+    LEGACY_AUTH_KEYS.forEach((key) => localStorage.removeItem(key));
   }, []);
 
   useEffect(() => {
@@ -122,8 +123,6 @@ export function App() {
   }
 
   function handleLogout() {
-    localStorage.removeItem("bh_token");
-    localStorage.removeItem("bh_user");
     setUser(null);
     setToken(null);
   }
@@ -251,7 +250,7 @@ function NetworksPage({ dashboard, analytics, simulation, selectedNode, setSelec
       <div className="flex items-end justify-between gap-4 mb-6">
         <div>
           <h2 className="font-display text-3xl uppercase tracking-widest">${viewTitle}</h2>
-          <p className="text-sm text-white/45 mt-2">The city AI ticks every ${Math.round((simulation?.intervalMs || 40000) / 1000)} seconds, opens cases, solves them, creates operators, kills them, and logs every move in the feed.</p>
+          <p className="text-sm text-white/45 mt-2">The city AI ticks every ${Math.round((simulation?.intervalMs || DEFAULT_SIMULATION_INTERVAL) / 1000)} seconds, opens cases, solves them, creates operators, kills them, and logs every move in the feed.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <button
@@ -494,9 +493,10 @@ function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashbo
   const [guessError, setGuessError] = useState("");
   const [isGuessing, setIsGuessing] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
+  const culpritGame = userProfile?.culpritGame || {};
   const suspects = (dashboard?.people || []).filter((person) => person.role === "criminal" && person.status === "alive");
-  const canGuess = userProfile?.culpritGame?.status === "active" && Boolean(userProfile?.culpritGame?.culpritInWorld);
-  const canRestart = userProfile?.culpritGame?.status === "solved" || userProfile?.culpritGame?.status === "locked";
+  const canGuess = culpritGame.status === "active" && Boolean(culpritGame.culpritInWorld);
+  const canRestart = culpritGame.status === "solved" || culpritGame.status === "locked";
 
   useEffect(() => {
     setFormState({
@@ -512,6 +512,10 @@ function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashbo
       setSuspectId("");
     }
   }, [suspectId, suspects]);
+
+  function updateFormField(field) {
+    return (event) => setFormState((current) => ({ ...current, [field]: event.target.value }));
+  }
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -607,7 +611,7 @@ function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashbo
               <input
                 type="text"
                 value=${formState.operatorName}
-                onChange=${(event) => setFormState((current) => ({ ...current, operatorName: event.target.value }))}
+                onChange=${updateFormField("operatorName")}
                 className="w-full rounded border border-white/10 bg-black/30 px-4 py-3 text-white outline-none transition focus:border-blood/50"
                 placeholder=${userProfile?.username || "Operator"}
               />
@@ -618,7 +622,7 @@ function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashbo
               <input
                 type="email"
                 value=${formState.email}
-                onChange=${(event) => setFormState((current) => ({ ...current, email: event.target.value }))}
+                onChange=${updateFormField("email")}
                 className="w-full rounded border border-white/10 bg-black/30 px-4 py-3 text-white outline-none transition focus:border-blood/50"
               />
             </label>
@@ -628,7 +632,7 @@ function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashbo
               <input
                 type="text"
                 value=${formState.title}
-                onChange=${(event) => setFormState((current) => ({ ...current, title: event.target.value }))}
+                onChange=${updateFormField("title")}
                 className="w-full rounded border border-white/10 bg-black/30 px-4 py-3 text-white outline-none transition focus:border-blood/50"
               />
             </label>
@@ -638,7 +642,7 @@ function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashbo
               <input
                 type="text"
                 value=${formState.division}
-                onChange=${(event) => setFormState((current) => ({ ...current, division: event.target.value }))}
+                onChange=${updateFormField("division")}
                 className="w-full rounded border border-white/10 bg-black/30 px-4 py-3 text-white outline-none transition focus:border-blood/50"
               />
             </label>
@@ -673,7 +677,7 @@ function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashbo
               </div>
               <div>
                 <p className="text-xs uppercase tracking-widest text-white/50">AI Cycle</p>
-                <p className="font-display text-2xl uppercase mt-2">${Math.round((simulation?.intervalMs || 40000) / 1000)} Sec</p>
+                <p className="font-display text-2xl uppercase mt-2">${Math.round((simulation?.intervalMs || DEFAULT_SIMULATION_INTERVAL) / 1000)} Sec</p>
               </div>
               <div>
                 <p className="text-xs uppercase tracking-widest text-white/50">Last Tick</p>
@@ -686,74 +690,73 @@ function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashbo
             <div className="flex items-center justify-between gap-3">
               <h3 className="font-bold uppercase tracking-widest text-blood">Culprit Guess</h3>
               <span className="rounded-full border border-blood/30 bg-blood/10 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-blood">
-                ${userProfile?.culpritGame?.attemptsRemaining ?? 3} attempts left
+                ${culpritGame.attemptsRemaining ?? 3} attempts left
               </span>
             </div>
 
-              <p className="mt-3 text-sm text-white/60">
-                Watch the clue cards in the AI feed, compare them with the network, and name the culprit before your three guesses run out.
-              </p>
+            <p className="mt-3 text-sm text-white/60">
+              Watch the clue cards in the AI feed, compare them with the network, and name the culprit before your three guesses run out.
+            </p>
 
-              <form onSubmit=${handleGuessSubmit} className="mt-4 space-y-4">
-                <div>
-                  <span className="block text-xs uppercase tracking-widest text-white/50 mb-2">Suspect Board</span>
-                  <div className="max-h-64 space-y-2 overflow-y-auto rounded-2xl border border-white/10 bg-black/35 p-2">
-                    ${suspects.length === 0
-                      ? html`<p className="px-3 py-4 text-sm text-white/45">No visible criminal suspects are in the world yet.</p>`
-                      : suspects.map((person) => html`
-                          <button
-                            key=${person._id}
-                            type="button"
-                            onClick=${() => setSuspectId(person._id)}
-                            disabled=${!canGuess || isGuessing}
-                            className=${`w-full rounded-xl border px-3 py-3 text-left transition ${
-                              suspectId === person._id
-                                ? "border-blood bg-blood/12 text-white"
-                                : "border-white/10 bg-black/40 text-white/82 hover:border-white/20 hover:bg-white/5"
-                            } disabled:cursor-not-allowed disabled:opacity-55`}
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <span className="font-semibold">${person.name}</span>
-                              <span className="text-[10px] uppercase tracking-[0.22em] text-white/40">${person.powerLevel || 0} power</span>
-                            </div>
-                            <p className="mt-1 text-xs uppercase tracking-[0.18em] text-white/45">
-                              ${person.rank || "Operator"} · ${person.faction || "Independent"}
-                            </p>
-                          </button>
-                        `)}
-                  </div>
+            <form onSubmit=${handleGuessSubmit} className="mt-4 space-y-4">
+              <div>
+                <span className="block text-xs uppercase tracking-widest text-white/50 mb-2">Suspect Board</span>
+                <div className="max-h-64 space-y-2 overflow-y-auto rounded-2xl border border-white/10 bg-black/35 p-2">
+                  ${suspects.length === 0
+                    ? html`<p className="px-3 py-4 text-sm text-white/45">No visible criminal suspects are in the world yet.</p>`
+                    : suspects.map((person) => html`
+                        <button
+                          key=${person._id}
+                          type="button"
+                          onClick=${() => setSuspectId(person._id)}
+                          disabled=${!canGuess || isGuessing}
+                          className=${`w-full rounded-xl border px-3 py-3 text-left transition ${
+                            suspectId === person._id
+                              ? "border-blood bg-blood/12 text-white"
+                              : "border-white/10 bg-black/40 text-white/82 hover:border-white/20 hover:bg-white/5"
+                          } disabled:cursor-not-allowed disabled:opacity-55`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="font-semibold">${person.name}</span>
+                            <span className="text-[10px] uppercase tracking-[0.22em] text-white/40">${person.powerLevel || 0} power</span>
+                          </div>
+                          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-white/45">
+                            ${person.rank || "Operator"} · ${person.faction || "Independent"}
+                          </p>
+                        </button>
+                      `)}
                 </div>
+              </div>
 
-                <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="submit"
+                  disabled=${isGuessing || !canGuess || !suspectId}
+                  className="rounded-full bg-blood px-5 py-3 text-sm uppercase tracking-[0.22em] text-white transition hover:bg-blood/85 disabled:opacity-60"
+                >
+                  ${isGuessing ? "Checking" : "Guess Culprit"}
+                </button>
+
+                ${canRestart && html`
                   <button
-                    type="submit"
-                    disabled=${isGuessing || !canGuess || !suspectId}
-                    className="rounded-full bg-blood px-5 py-3 text-sm uppercase tracking-[0.22em] text-white transition hover:bg-blood/85 disabled:opacity-60"
+                    type="button"
+                    onClick=${handleRestartGame}
+                    disabled=${isRestarting}
+                    className="rounded-full border border-white/15 bg-white/5 px-5 py-3 text-sm uppercase tracking-[0.22em] text-white transition hover:border-blood/35 hover:bg-blood/10 disabled:opacity-60"
                   >
-                    ${isGuessing ? "Checking" : "Guess Culprit"}
+                    ${isRestarting ? "Restarting" : "Restart Hunt"}
                   </button>
+                `}
+              </div>
+            </form>
 
-                  ${canRestart && html`
-                    <button
-                      type="button"
-                      onClick=${handleRestartGame}
-                      disabled=${isRestarting}
-                      className="rounded-full border border-white/15 bg-white/5 px-5 py-3 text-sm uppercase tracking-[0.22em] text-white transition hover:border-blood/35 hover:bg-blood/10 disabled:opacity-60"
-                    >
-                      ${isRestarting ? "Restarting" : "Restart Hunt"}
-                    </button>
-                  `}
-                </div>
-              </form>
-
-              ${guessError && html`<p className="mt-4 rounded border border-blood/30 bg-blood/10 px-4 py-3 text-sm text-blood">${guessError}</p>`}
-              ${guessMessage && html`<p className="mt-4 rounded border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/80">${guessMessage}</p>`}
-              ${userProfile?.culpritGame?.status !== "active" &&
-              html`
-                <p className="mt-4 text-sm text-white/70">
-                ${userProfile?.culpritGame?.status === "solved"
-                  ? `Case solved. Culprit: ${userProfile?.culpritGame?.culpritRevealedName}.`
-                  : `Case locked. Culprit: ${userProfile?.culpritGame?.culpritRevealedName || "unknown"}.`}
+            ${guessError && html`<p className="mt-4 rounded border border-blood/30 bg-blood/10 px-4 py-3 text-sm text-blood">${guessError}</p>`}
+            ${guessMessage && html`<p className="mt-4 rounded border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/80">${guessMessage}</p>`}
+            ${culpritGame.status !== "active" && html`
+              <p className="mt-4 text-sm text-white/70">
+                ${culpritGame.status === "solved"
+                  ? `Case solved. Culprit: ${culpritGame.culpritRevealedName}.`
+                  : `Case locked. Culprit: ${culpritGame.culpritRevealedName || "unknown"}.`}
               </p>
             `}
           </div>
@@ -782,3 +785,5 @@ function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashbo
     </div>
   `;
 }
+
+

@@ -1,25 +1,24 @@
 import { React, html } from "../lib/html.js";
 
 const { useState } = React;
+const EMPTY_ERROR = "";
 
 export function AuthScreen({ onLogin }) {
   const [isLogin, setIsLogin] = useState(true);
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(EMPTY_ERROR);
   const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setError("");
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setError(EMPTY_ERROR);
     setLoading(true);
 
     try {
+      const body = isLogin ? { email, password } : { username, email, password };
       const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
-      const body = isLogin 
-        ? { email, password } 
-        : { username, email, password };
 
       const res = await fetch(endpoint, {
         method: "POST",
@@ -39,6 +38,11 @@ export function AuthScreen({ onLogin }) {
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleModeToggle() {
+    setIsLogin((value) => !value);
+    setError(EMPTY_ERROR);
   }
 
   return html`
@@ -112,7 +116,7 @@ export function AuthScreen({ onLogin }) {
           <div className="mt-6 text-center">
             <button
               type="button"
-              onClick=${() => { setIsLogin(!isLogin); setError(""); }}
+              onClick=${handleModeToggle}
               className="text-white/50 text-sm hover:text-blood transition"
             >
               ${isLogin ? "New operator? Register here" : "Already registered? Login here"}
