@@ -1987,6 +1987,10 @@ function emitGraphRefresh(io, reason) {
 
 const JWT_SECRET = process.env.JWT_SECRET || "black-horizon-secret-key-change-in-production";
 
+function buildSystemEmail(username) {
+  return `operator+${String(username || "").trim()}@sin-city.local`;
+}
+
 function generateToken(user) {
   const jwt = require("jsonwebtoken");
   return jwt.sign(
@@ -2024,17 +2028,38 @@ async function buildSerializedUser(user) {
 
 async function registerUser({ username, email, password }) {
   const { User } = require("./models");
-  
-  const existingUser = await User.findOne({
-    $or: [{ username }, { email }]
-  });
-  if (existingUser) {
-    const error = new Error("Username or email already exists");
+  const normalizedUsername = String(username || "").trim();
+  const normalizedPassword = String(password || "");
+
+  if (!normalizedUsername || normalizedUsername.length < 3) {
+    const error = new Error("Username must be at least 3 characters");
     error.status = 400;
     throw error;
   }
 
-  const user = await User.create({ username, email, password });
+  if (normalizedPassword.length < 6) {
+    const error = new Error("Password must be at least 6 characters");
+    error.status = 400;
+    throw error;
+  }
+  
+  const existingUser = await User.findOne({ username: normalizedUsername });
+  if (existingUser) {
+    const error = new Error("Username already exists");
+    error.status = 400;
+    throw error;
+  }
+
+  const resolvedEmail =
+    typeof email === "string" && email.trim()
+      ? email.trim()
+      : buildSystemEmail(normalizedUsername);
+
+  const user = await User.create({
+    username: normalizedUsername,
+    email: resolvedEmail,
+    password: normalizedPassword
+  });
   const token = generateToken(user);
   
   // Initialize starter world for new user
@@ -2047,10 +2072,11 @@ async function registerUser({ username, email, password }) {
   };
 }
 
-async function loginUser({ email, password }) {
+async function loginUser({ username, password }) {
   const { User } = require("./models");
+  const normalizedUsername = String(username || "").trim();
   
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ username: normalizedUsername });
   if (!user) {
     const error = new Error("Invalid credentials");
     error.status = 401;
@@ -2093,17 +2119,6 @@ async function updateCurrentUser(userId, payload) {
     const error = new Error("User not found");
     error.status = 404;
     throw error;
-  }
-
-  if (typeof payload.email === "string" && payload.email.trim() !== user.email) {
-    const email = payload.email.trim();
-    const existingUser = await User.findOne({ email, _id: { $ne: userId } });
-    if (existingUser) {
-      const error = new Error("Email already exists");
-      error.status = 400;
-      throw error;
-    }
-    user.email = email;
   }
 
   if (typeof payload.operatorName === "string") {

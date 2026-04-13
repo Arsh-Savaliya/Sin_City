@@ -6,7 +6,6 @@ const EMPTY_ERROR = "";
 export function AuthScreen({ onLogin }) {
   const [isLogin, setIsLogin] = useState(true);
   const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(EMPTY_ERROR);
   const [loading, setLoading] = useState(false);
@@ -17,7 +16,7 @@ export function AuthScreen({ onLogin }) {
     setLoading(true);
 
     try {
-      const body = isLogin ? { email, password } : { username, email, password };
+      const body = { username, password };
       const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
 
       const res = await fetch(endpoint, {
@@ -65,29 +64,16 @@ export function AuthScreen({ onLogin }) {
           `}
 
           <form onSubmit=${handleSubmit} className="space-y-4">
-            ${!isLogin && html`
-              <div>
-                <label className="block text-xs uppercase tracking-widest text-white/50 mb-1">Username</label>
-                <input
-                  type="text"
-                  value=${username}
-                  onChange=${(e) => setUsername(e.target.value)}
-                  className="w-full bg-white/10 border border-white/20 px-4 py-3 rounded text-white placeholder-white/30 focus:border-blood focus:outline-none"
-                  placeholder="Enter username"
-                  required
-                />
-              </div>
-            `}
-
             <div>
-              <label className="block text-xs uppercase tracking-widest text-white/50 mb-1">Email</label>
+              <label className="block text-xs uppercase tracking-widest text-white/50 mb-1">Username</label>
               <input
-                type="email"
-                value=${email}
-                onChange=${(e) => setEmail(e.target.value)}
+                type="text"
+                value=${username}
+                onChange=${(e) => setUsername(e.target.value)}
                 className="w-full bg-white/10 border border-white/20 px-4 py-3 rounded text-white placeholder-white/30 focus:border-blood focus:outline-none"
-                placeholder="Enter email"
+                placeholder="Enter username"
                 required
+                minlength="3"
               />
             </div>
 

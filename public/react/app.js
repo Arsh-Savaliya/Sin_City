@@ -481,7 +481,6 @@ function MessagesPage({ messages }) {
 function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashboard, onGuessCulprit, onRestartCulpritGame }) {
   const [formState, setFormState] = useState(() => ({
     operatorName: userProfile?.operatorName || userProfile?.username || "",
-    email: userProfile?.email || "",
     title: userProfile?.title || "Field Analyst",
     division: userProfile?.division || "Intelligence Unit"
   }));
@@ -501,7 +500,6 @@ function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashbo
   useEffect(() => {
     setFormState({
       operatorName: userProfile?.operatorName || userProfile?.username || "",
-      email: userProfile?.email || "",
       title: userProfile?.title || "Field Analyst",
       division: userProfile?.division || "Intelligence Unit"
     });
@@ -614,16 +612,6 @@ function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashbo
                 onChange=${updateFormField("operatorName")}
                 className="w-full rounded border border-white/10 bg-black/30 px-4 py-3 text-white outline-none transition focus:border-blood/50"
                 placeholder=${userProfile?.username || "Operator"}
-              />
-            </label>
-
-            <label className="block">
-              <span className="block text-xs uppercase tracking-widest text-white/50 mb-2">Email</span>
-              <input
-                type="email"
-                value=${formState.email}
-                onChange=${updateFormField("email")}
-                className="w-full rounded border border-white/10 bg-black/30 px-4 py-3 text-white outline-none transition focus:border-blood/50"
               />
             </label>
 
@@ -785,4 +773,3 @@ function UserDetailsPage({ userProfile, selectedNode, simulation, onSave, dashbo
     </div>
   `;
 }
-
