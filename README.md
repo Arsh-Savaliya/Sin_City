@@ -1,34 +1,25 @@
-Nocturne is a Sin City themed crime-intelligence web app. 
-It mixes a live criminal network, police corruption tracking, AI-generated world events, and a simple mystery game where the user must identify a hidden culprit from clues in the feed.
+# VELVET n VICE
 
-## Problem Statement
+VELVET n VICE is a neo-noir crime intelligence dashboard built as a single Node.js application. It combines a browser-based React UI, an Express API, MongoDB persistence, and a lightweight simulation engine that keeps the city moving with live events, network shifts, and a culprit-hunt game loop.
 
-Crime data is usually hard to read when it is spread across logs, case notes, and disconnected profiles.  
-Nocturne turns that chaos into one readable interface where an operator can:
+## Features
 
-- watch the city evolve in real time
-- inspect relationships between criminals and police
-- follow AI feed clues
-- solve the active culprit hunt before the three guesses run out
+- Username and password authentication
+- Per-user world state stored in MongoDB
+- Criminal, police, and corruption network views
+- Live event feed powered by a local simulation engine
+- Hidden culprit investigation game with limited guesses
+- Operator profile editing
+- Single-service deployment: frontend and backend served by Express
 
-## Core Features
+## Tech Stack
 
-- Authentication with per-user worlds
-- Live criminal, police, and corruption network views
-- AI feed that logs world events, clue drops, case creation, case solving, deaths, and power recalibration
-- Editable operator profile
-- Hidden culprit game with 3 guesses and restart flow
-- 40-second autonomous AI tick plus manual force tick
-- Responsive dashboard built for desktop and mobile
-
-## Stack Used
-
-- Frontend: React via browser modules + TailwindCSS
-- Backend: Node.js + Express
-- Database: MongoDB + Mongoose
-- Realtime refresh: Socket.IO
+- Backend: Node.js, Express, Mongoose, Socket.IO
+- Frontend: React via browser modules
+- Graphs: D3.js
+- Database: MongoDB
 - Auth: JWT
-- AI layer: local simulation logic only
+- Logging and middleware: Morgan, CORS, dotenv
 
 ## Project Structure
 
@@ -48,40 +39,71 @@ Nocturne turns that chaos into one readable interface where an operator can:
 |       `-- main.js
 |-- src
 |   |-- models.js
-|   |-- seed
+|   |-- seed.js
 |   `-- services.js
 |-- server.js
 |-- package.json
 `-- README.md
 ```
 
-## Local Setup
+## Environment Variables
 
-1. Create a `.env` file.
-2. Add your MongoDB connection string and JWT secret.
-3. Install dependencies:
-
-```bash
-npm install
-```
-
-4. Start the app:
-
-```bash
-npm run dev
-```
-
-5. Open [http://localhost:5000](http://localhost:5000)
-
-## Example `.env`
+Create a `.env` file in the project root:
 
 ```env
-MONGODB_URI=mongodb://127.0.0.1:27017/nocturne
-JWT_SECRET=change-this-secret
 PORT=5000
+MONGODB_URI=mongodb://127.0.0.1:27017/sin-city
+JWT_SECRET=change-this-secret
 ```
 
-## Main API Routes
+Notes:
+
+- `PORT` is optional in local development.
+- `MONGODB_URI` is required.
+- `JWT_SECRET` should be replaced with a strong random secret in production.
+
+## Local Development
+
+1. Install dependencies:
+
+   ```bash
+   npm install
+   ```
+
+2. Add your `.env` file.
+
+3. Start the app:
+
+   ```bash
+   npm run dev
+   ```
+
+4. Open:
+
+   ```text
+   http://localhost:5000
+   ```
+
+The app serves both the API and frontend from the same process.
+
+## Authentication
+
+- Login uses `username + password`
+- Registration uses `username + password`
+
+## Available Scripts
+
+```bash
+npm start
+npm run dev
+npm run seed
+```
+
+- `npm start`: run the production server
+- `npm run dev`: run with nodemon
+- `npm run seed`: run the seed script manually
+
+## Main Routes
 
 ### Auth
 
@@ -101,8 +123,53 @@ PORT=5000
 - `POST /api/dashboard/culprit/guess`
 - `POST /api/dashboard/culprit/restart`
 
-## Deployment Notes
+### Entities
 
-- Frontend + backend can be served together from the Express app.
-- Recommended hosting: Render for the app and MongoDB Atlas for the database.
-- Keep secrets in environment variables only.
+- `GET /api/people`
+- `POST /api/people`
+- `PATCH /api/people/:id`
+- `DELETE /api/people/:id`
+- `GET /api/crimes`
+- `POST /api/crimes`
+- `PATCH /api/crimes/:id`
+- `GET /api/relationships`
+- `POST /api/relationships`
+- `PATCH /api/relationships/:id`
+- `DELETE /api/relationships/:id`
+
+## Railway Deployment
+
+This project can be deployed as a single Railway web service.
+
+### Recommended Setup
+
+- App hosting: Railway
+- Database: MongoDB Atlas
+
+### Railway Settings
+
+- Build command: leave empty
+- Start command: `npm start`
+- Healthcheck path: `/health`
+
+### Required Railway Variables
+
+```env
+MONGODB_URI=your-atlas-connection-string
+JWT_SECRET=your-production-secret
+```
+
+### Deployment Notes
+
+- The app already listens on `process.env.PORT`, so Railway will inject the runtime port automatically.
+- The frontend is served from Express, so no separate frontend service is needed.
+- Make sure MongoDB Atlas network access allows Railway to connect.
+
+
+## Production Checklist
+
+- Set `MONGODB_URI`
+- Set a strong `JWT_SECRET`
+- Keep `.env` out of git
+- Rotate secrets if they were ever committed publicly
+- Confirm MongoDB Atlas IP/network access allows the deployed service
