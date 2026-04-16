@@ -635,17 +635,20 @@ async function hydrateLoreProfiles() {
   );
 }
 
-async function uniqueGeneratedName() {
+async function uniqueGeneratedName(userId = null) {
   let attempts = 0;
-  while (attempts < 10) {
+
+  while (attempts < 24) {
     const name = `${pickRandom(firstNames)} ${pickRandom(lastNames)}`;
-    const existing = await Person.exists({ name });
+    const query = userId ? { userId, name } : { name };
+    const existing = await Person.exists(query);
     if (!existing) {
       return name;
     }
     attempts += 1;
   }
-  return `Ghost ${Date.now().toString().slice(-4)}`;
+
+  return `${pickRandom(firstNames)} ${pickRandom(lastNames)}`;
 }
 
 function clampSummary(text, maxLength = 420) {
@@ -1077,7 +1080,7 @@ async function generateEmergentCharacter(userId = null) {
   ]);
 
   const targetFaction = factions[0]?._id || "Outlands";
-  const name = await uniqueGeneratedName();
+  const name = await uniqueGeneratedName(userId);
   const isOutsider = Math.random() > 0.45;
   const backgroundTier = pickRandom(["powerful", "balanced", "weak"]);
   const profile = backgroundProfiles[backgroundTier];
@@ -1718,7 +1721,7 @@ async function ensureCulpritForUser(userId) {
   const profile = backgroundProfiles.balanced;
   const culprit = await Person.create({
     userId,
-    name: await uniqueGeneratedName(),
+      name: await uniqueGeneratedName(userId),
     alias: pickRandom(aliases),
     role: "criminal",
     faction: "Independent",
