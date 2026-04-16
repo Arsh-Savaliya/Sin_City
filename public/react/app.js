@@ -142,6 +142,7 @@ export function App() {
 
   async function handleRestartCulpritGame() {
     const result = await api.restartCulpritGame(token);
+    setSelectedNode(null);
     setUser(normalizeUserProfile({ ...user, ...result.user }));
     await actions.refresh();
     return result;

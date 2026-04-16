@@ -1926,7 +1926,7 @@ async function guessCulprit(userId, suspectId) {
 }
 
 async function restartCulpritGame(userId) {
-  const { User } = require("./models");
+  const { User, Person, Crime, Relationship, Event } = require("./models");
   const user = await User.findById(userId);
   if (!user) {
     const error = new Error("User not found");
@@ -1940,14 +1940,6 @@ async function restartCulpritGame(userId) {
     throw error;
   }
 
-  if (user.culpritPersonId) {
-    const previousCulprit = await Person.findOne({ _id: user.culpritPersonId, userId });
-    if (previousCulprit) {
-      previousCulprit.isCulprit = false;
-      await previousCulprit.save();
-    }
-  }
-
   user.culpritPersonId = null;
   user.culpritClueStage = 0;
   user.culpritGuessCount = 0;
@@ -1955,20 +1947,20 @@ async function restartCulpritGame(userId) {
   user.culpritRevealedName = null;
   await user.save();
 
-  const culprit = await ensureCulpritForUser(userId);
-  await createEvent(userId, {
-    type: "investigation",
-    headline: "Fresh hunt opened",
-    summary: "The previous file is closed. A new hidden culprit is moving in the city and will surface through the AI feed.",
-    actor: null,
-    faction: culprit?.faction || "Independent",
-    metadata: { culpritRestarted: true }
-  });
+  await Promise.all([
+    Event.deleteMany({ userId }),
+    Crime.deleteMany({ userId }),
+    Relationship.deleteMany({ userId }),
+    Person.deleteMany({ userId })
+  ]);
+
+  await createStarterWorld(userId);
+  await ensureCulpritForUser(userId);
 
   const refreshedUser = await User.findById(userId);
   return {
     user: await buildSerializedUser(refreshedUser),
-    message: "A fresh culprit hunt is now active."
+    message: "A fresh world is now active."
   };
 }
 
